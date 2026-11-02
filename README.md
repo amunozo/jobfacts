@@ -164,6 +164,14 @@ Milestones 3 and 4 start only after Milestones 1 and 2 are finished.
 - Private mode: fit against a CV, and links to the private job-search
   repository (for example, `job_watch` reading from this database). This
   stays out of the public code.
+- **Decision Apertus (side project, not planned).** A Jev-style decision
+  model (answers chosen from fixed options, with probabilities, no free
+  text) built on Apertus, the Swiss open model, by training it on labels
+  from a stronger model. Look into it if the accuracy report shows Jev
+  clearly weaker in German or French than in English on some field (about
+  10+ points, beyond the 95% intervals) and sending those postings to
+  another extractor does not fix it. Italian cannot be judged until the
+  test set has Italian postings.
 
 ## Publishing and licence
 
