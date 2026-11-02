@@ -156,6 +156,8 @@ The evaluation is the core of the project, not an extra.
 Milestones 3 and 4 start only after Milestones 1 and 2 are finished.
 
 **Later (not planned yet):**
+- Language requirements for English and Italian (Milestone 1 extracts
+  German and French only).
 - Private mode: fit against a CV, and links to the private job-search
   repository (for example, `job_watch` reading from this database). This
   stays out of the public code.
