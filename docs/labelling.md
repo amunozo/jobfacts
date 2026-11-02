@@ -26,8 +26,15 @@ in the page for the keyboard shortcuts.
 - **Prefilled**: later postings. Each field is pre-filled with the value that at
   least 2 of the 3 extractors agree on, with the sentences chosen by at least 2
   of those; if all three differ, that field has no pre-fill. Model names are
-  never sent. `office_locations` is pre-filled the same way (set equality).
+  never sent. `office_cantons` is pre-filled the same way (set equality of the canton sets);
+  `office_places` is then the places code finds in the posting inside the pre-filled cantons.
   The mode is decided by the server and saved with the label.
+
+Offices are labelled canton first, then place: the owner confirms the canton set
+(`office_cantons`: canton codes and/or `outside_switzerland`; empty = not stated), and the
+places inside those cantons (`office_places`, keys `place:<bfs_nr>:<name>`, from the
+official swisstopo register, found by code). `canton_hints` and `place_candidates` are
+suggestions from code.
 
 Sentence ids: `0` = title, `-1` = location field, `1..n` = description sentences.
 
@@ -38,7 +45,9 @@ Sentence ids: `0` = title, `-1` = location field, `1..n` = description sentences
 {"fields": [{"name": "work_mode", "question": "Where is the work done...?",
              "values": [{"value": "not_stated", "definition": "The posting does not say.",
                          "needs_sentence": false}]}],
- "location_keys": ["canton:ZH", "city:Zürich", "country:CH", "outside_switzerland"],
+ "cantons": [{"code": "ZH", "name_en": "Zurich", "name_de": "Zürich", "name_fr": "Zurich",
+              "name_it": "Zurigo", "places": ["Zürich", "Winterthur", "Dübendorf"]}],
+ "outside_value": "outside_switzerland",
  "relevant_values": ["true", "false", "unsure"]}
 ```
 
@@ -56,13 +65,21 @@ List sorted by `order`. The language and group are shown on purpose.
  "sentences": [{"id": 1, "text": "We work in a hybrid mode."}],
  "mode": "prefilled",
  "prefill": {"fields": {"work_mode": {"value": "hybrid", "sentences": [1]}},
-             "office_locations": ["city:Zürich"], "office_locations_sentences": [-1]},
- "location_candidates": [{"key": "city:Zürich", "matched": "Zürich", "where": "location field"}],
+             "office_cantons": ["ZH"], "office_cantons_sentences": [-1],
+             "office_places": ["place:261:Zürich"]},
+ "canton_hints": ["ZH", "SZ"],
+ "place_candidates": {"ZH": [{"key": "place:261:Zürich", "name": "Zürich", "commune": "Zürich",
+                              "matched": "Zürich", "where": "location field"}],
+                      "SZ": []},
  "fields": ["... same as /api/spec fields ..."],
  "label": null}
 ```
 `prefill` is `null` in blind mode or when no extraction exists; `prefill.fields`
-omits fields without a majority. `label` is the latest saved record or `null`.
+omits fields without a majority; `office_cantons` / `office_cantons_sentences` /
+`office_places` are present only when at least two extractors agree on the canton set.
+`canton_hints` are the cantons code finds anywhere in the posting (whole register); 
+`place_candidates` maps each hinted canton to the places found in it (`where`: `location field`,
+`title` or `posting text`). Both are shown in blind mode too (they come from code, not a model). `label` is the latest saved record or `null`.
 404 for an unknown posting.
 
 ### `PUT /api/items/{posting_id}/label`
@@ -75,13 +92,18 @@ Request (every field of the spec is required):
             "french": {"value": "not_mentioned", "sentences": []},
             "min_years": {"value": "3", "sentences": [2]},
             "title_level": {"value": "not_stated", "sentences": []}},
- "office_locations": ["city:Zürich"], "office_locations_sentences": [-1],
+ "office_cantons": ["ZH"], "office_cantons_sentences": [-1],
+ "office_places": ["place:261:Zürich"],
  "note": ""}
 ```
 Rules: `value` must be an allowed value; values that mean "not stated / not mentioned /
 not applicable" take no sentences, every other value needs at least one existing
 sentence id; `relevant` is `"true"`, `"false"` or `"unsure"` (booleans accepted);
-`office_locations` are keys from `/api/spec`.
+`office_cantons` are codes from `/api/spec` `cantons` plus `outside_value`: a non-empty list
+needs at least one existing sentence id in `office_cantons_sentences`, an empty list (not
+stated) takes none. `office_places` is optional: when omitted the server stores the places code
+finds for the labelled cantons (`[]` is accepted and means none); every key must exist and lie
+in a labelled canton. The saved record has the cantons in spec order (`outside_switzerland` last).
 
 Response 200: `{"saved": {<the line appended to labels.jsonl>}}`, which adds
 `posting_id`, `labeller` ("owner"), `mode` and `saved_at`.

@@ -34,6 +34,20 @@ def field_spec() -> list[dict]:
     ]
 
 
+def canton_spec() -> list[dict]:
+    return [
+        {
+            "code": c.code,
+            "name_en": c.en,
+            "name_de": c.de,
+            "name_fr": c.fr,
+            "name_it": c.it,
+            "places": list(c.places),
+        }
+        for c in locations.CANTONS.values()
+    ]
+
+
 def create_app(
     items: list[dict],
     labels_path: Path,
@@ -47,6 +61,11 @@ def create_app(
     def mode_of(item: dict) -> str:
         return "blind" if item["order"] < blind_count else "prefilled"
 
+    def posting_text(item: dict) -> PostingText:
+        return PostingText.build(
+            item["posting_id"], item["title"], item["location_raw"], item["description_text"]
+        )
+
     def get_item(posting_id: int) -> dict:
         if posting_id not in by_id:
             raise HTTPException(404, "unknown posting")
@@ -56,7 +75,8 @@ def create_app(
     def spec():
         return {
             "fields": field_spec(),
-            "location_keys": sorted(locations.all_keys()),
+            "cantons": canton_spec(),
+            "outside_value": locations.OUTSIDE,
             "relevant_values": list(labels.RELEVANT_VALUES),
         }
 
@@ -85,7 +105,16 @@ def create_app(
         if mode == "prefilled":
             by_model = extractions.get(posting_id, {})
             pre = prefill.majority(by_model) if by_model else None
-        pt = PostingText.build(posting_id, it["title"], it["location_raw"], it["description_text"])
+        pt = posting_text(it)
+        hints = pt.canton_hints()
+        by_canton: dict[str, list[dict]] = {c: [] for c in hints}
+        for m, where in pt.places_in(hints):
+            by_canton.setdefault(m.canton, []).append(
+                {"key": m.key, "name": m.name, "commune": m.commune, "matched": m.matched,
+                 "where": where}
+            )  # fmt: skip
+        if pre and "office_cantons" in pre:
+            pre["office_places"] = [m.key for m, _ in pt.places_in(pre["office_cantons"])]
         return {
             "posting_id": posting_id,
             "order": it["order"],
@@ -97,9 +126,8 @@ def create_app(
             "sentences": it["sentences"],
             "mode": mode,
             "prefill": pre,
-            "location_candidates": [
-                {"key": c.key, "matched": c.matched, "where": where} for c, where in pt.candidates()
-            ],
+            "canton_hints": hints,
+            "place_candidates": by_canton,
             "fields": field_spec(),
             "label": labels.latest(labels_path).get(posting_id),
         }
@@ -114,8 +142,14 @@ def create_app(
         if not isinstance(payload, dict):
             return JSONResponse({"errors": {"body": "must be a JSON object"}}, status_code=422)
         try:
+            pt = posting_text(it)
             record = labels.save(
-                labels_path, posting_id, payload, labels.snapshot_sentence_ids(it), mode_of(it)
+                labels_path,
+                posting_id,
+                payload,
+                labels.snapshot_sentence_ids(it),
+                mode_of(it),
+                default_places=lambda cantons: [m.key for m, _ in pt.places_in(cantons)],
             )
         except labels.ValidationError as error:
             return JSONResponse({"errors": error.errors}, status_code=422)

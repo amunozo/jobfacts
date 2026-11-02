@@ -6,7 +6,7 @@ the options reversed and shuffled (fixed seed), stores the runs as normal extrac
 compares the answers with the original Jev run.
 
 The comparison works on "extraction dicts" (see `jobfacts.evaluate.load_run`): keys `error`,
-`values`, `office_locations`.
+`values`, `office_cantons`.
 """
 
 import json
@@ -34,7 +34,7 @@ def compare(original: dict[int, dict], variant: dict[int, dict]) -> dict[str, di
 
     Only postings with a successful extraction in both runs are compared. Directions:
     `neutral_to_value` (not_stated -> something), `value_to_neutral`, `value_to_value`.
-    `office_locations` counts a changed set; direction = locations added / removed / replaced.
+    `office_cantons` counts a changed set; direction = cantons added / removed / replaced.
     """
     out: dict[str, dict] = {}
     pids = [
@@ -42,14 +42,17 @@ def compare(original: dict[int, dict], variant: dict[int, dict]) -> dict[str, di
         for p in sorted(original)
         if p in variant and not original[p]["error"] and not variant[p]["error"]
     ]
-    for name in [*FIELDS, "office_locations"]:
+    for name in [*FIELDS, "office_cantons"]:
         n = changed = 0
         directions: Counter = Counter()
         moves: Counter = Counter()
         for p in pids:
             n += 1
-            if name == "office_locations":
-                a, b = set(original[p]["office_locations"]), set(variant[p]["office_locations"])
+            if name == "office_cantons":
+                if original[p]["office_cantons"] is None or variant[p]["office_cantons"] is None:
+                    n -= 1  # a run from before the canton redesign: nothing to compare
+                    continue
+                a, b = set(original[p]["office_cantons"]), set(variant[p]["office_cantons"])
                 if a == b:
                     continue
                 changed += 1
@@ -79,7 +82,7 @@ def render(comparisons: dict[str, dict[str, dict]]) -> str:
             d = r["directions"]
             share = f"{100 * r['changed'] / r['n']:.0f}%" if r["n"] else "-"
             moves = "; ".join(f"{m} ({c})" for m, c in r["moves"].most_common(3))
-            if name == "office_locations":
+            if name == "office_cantons":
                 cells = ["-", "-", "-"]
                 moves = ", ".join(f"{k} {v}" for k, v in sorted(d.items()))
             else:

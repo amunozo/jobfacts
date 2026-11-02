@@ -11,7 +11,8 @@ from jobfacts.extract.spec import FIELDS, derive_seniority
 class Result:
     values: dict[str, str] = field(default_factory=dict)
     sentences: dict[str, list[int]] = field(default_factory=dict)
-    office_locations: list[str] = field(default_factory=list)
+    office_cantons: list[str] = field(default_factory=list)  # model: codes + outside_switzerland
+    office_places: list[str] = field(default_factory=list)  # code: place keys in those cantons
     details: dict = field(default_factory=dict)  # probabilities, confidences, raw output
     tokens_in: int = 0
     tokens_out: int = 0

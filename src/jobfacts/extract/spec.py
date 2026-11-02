@@ -12,6 +12,8 @@ import json
 import random
 from dataclasses import dataclass
 
+from jobfacts import locations
+
 # Sentence ids shown to the models. Posting sentences are 1..n (jobfacts.sentences.split).
 TITLE_ID = 0
 LOCATION_ID = -1
@@ -140,11 +142,35 @@ RELEVANCE_QUESTION = (
     "engineering, data analytics, or research?"
 )
 
-LOCATION_QUESTION = (
-    'Is "{matched}" ({where}) a place where this role is based, that is, an office '
-    "location for this role? Answer no if the place is only mentioned for other reasons "
-    "(company history, customers, other roles, travel)."
+# office_cantons: not a one-value field. The model picks any number of canton codes (and
+# OUTSIDE); none = not stated. Evidence sentences are required when anything is picked.
+OFFICE_CANTONS = "office_cantons"
+OFFICE_CANTONS_QUESTION = (
+    "In which Swiss cantons does the posting name an office or work location for this "
+    f'role? Use the canton codes, plus "{locations.OUTSIDE}" if an office outside '
+    "Switzerland is named. Pick none if the posting names no office location."
 )
+_NOT_REASONS = (
+    "Answer no if the place is only mentioned for other reasons (company history, "
+    "customers, other roles, travel)."
+)
+CANTON_QUESTION = (
+    "Does the posting name an office or work location for this role in canton {name} "
+    f"({{code}}; for example {{places}})? {_NOT_REASONS}"
+)
+OUTSIDE_QUESTION = (
+    "Does the posting name an office or work location for this role outside Switzerland "
+    f"(in another country)? {_NOT_REASONS}"
+)
+OFFICE_EVIDENCE_QUESTION = (
+    "Which line of the posting names the office or work location of this role? "
+    "Choose none if no line does."
+)
+
+
+def canton_question(code: str) -> str:
+    c = locations.CANTONS[code]
+    return CANTON_QUESTION.format(name=c.en, code=code, places=", ".join(c.places))
 
 
 def derive_seniority(min_years: str, title_level: str) -> str:
@@ -196,7 +222,12 @@ def spec_hash(extra: str = "") -> str:
                 for n, f in FIELDS.items()
             },
             "rules": GENERAL_RULES,
-            "location": LOCATION_QUESTION,
+            "cantons": [
+                OFFICE_CANTONS_QUESTION,
+                OUTSIDE_QUESTION,
+                OFFICE_EVIDENCE_QUESTION,
+                [canton_question(c) for c in locations.CANTONS],
+            ],
             "extra": extra,
         },
         sort_keys=True,

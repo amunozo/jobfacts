@@ -9,9 +9,10 @@ from collections import Counter
 
 import psycopg
 
+from jobfacts import locations
 from jobfacts.extract.spec import FIELDS
 
-# {"values", "sentences", "office_locations", "office_locations_sentences"}
+# {"values", "sentences", "office_cantons", "office_cantons_sentences"}
 Extraction = dict
 
 
@@ -36,15 +37,15 @@ def majority(by_model: dict[str, Extraction]) -> dict:
                 "sentences": _sentences([s for v, s in votes if v == value]),
             }
     result: dict = {"fields": fields}
-    locs = {k: frozenset(e["office_locations"]) for k, e in by_model.items()}
-    count = Counter(locs.values())
+    sets = {k: frozenset(e["office_cantons"]) for k, e in by_model.items()}
+    count = Counter(sets.values())
     if count:
         chosen, n = count.most_common(1)[0]
         if n >= 2:
-            agreeing = [e for k, e in by_model.items() if locs[k] == chosen]
-            result["office_locations"] = sorted(chosen)
-            result["office_locations_sentences"] = _sentences(
-                [e.get("office_locations_sentences", []) for e in agreeing]
+            agreeing = [e for k, e in by_model.items() if sets[k] == chosen]
+            result["office_cantons"] = [c for c in locations.office_canton_values() if c in chosen]
+            result["office_cantons_sentences"] = _sentences(
+                [e.get("office_cantons_sentences", []) for e in agreeing]
             )
     return result
 
@@ -57,17 +58,17 @@ def load_extractions(
     out: dict[int, dict[str, Extraction]] = {}
     for extractor, run_id in run_ids.items():
         rows = conn.execute(
-            f"SELECT posting_id, office_locations, details, {cols} FROM extractions "
+            f"SELECT posting_id, office_cantons, office_cantons_sentences, {cols} FROM extractions "
             "WHERE run_id = %s AND error IS NULL",
             (run_id,),
         ).fetchall()
-        for posting_id, locs, details, *rest in rows:
+        for posting_id, cantons, canton_sentences, *rest in rows:
             values = {n: rest[2 * i] for i, n in enumerate(FIELDS)}
             sentences = {n: rest[2 * i + 1] or [] for i, n in enumerate(FIELDS)}
             out.setdefault(posting_id, {})[extractor] = {
                 "values": values,
                 "sentences": sentences,
-                "office_locations": list(locs or []),
-                "office_locations_sentences": list(details.get("office_locations_sentences", [])),
+                "office_cantons": list(cantons or []),
+                "office_cantons_sentences": list(canton_sentences or []),
             }
     return out

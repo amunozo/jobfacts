@@ -9,15 +9,16 @@ from jobfacts.extract import jev
 from jobfacts.extract.spec import FIELDS, order_values
 
 
-def ext(error=None, locs=(), loc_sent=(), sentences=None, details=None, **values):
+def ext(error=None, locs=(), loc_sent=(), places=(), sentences=None, details=None, **values):
     base = {n: next(iter(f.values)) for n, f in FIELDS.items()}
     base.update(values)
     return {
         "error": error,
         "values": {} if error else base,
         "sentences": sentences or {},
-        "office_locations": list(locs),
-        "office_locations_sentences": list(loc_sent),
+        "office_cantons": list(locs),
+        "office_cantons_sentences": list(loc_sent),
+        "office_places": list(places),
         "details": details or {},
         "cost_usd": 0.01,
         "latency_ms": 100,
@@ -26,7 +27,9 @@ def ext(error=None, locs=(), loc_sent=(), sentences=None, details=None, **values
     }
 
 
-def label(pid=1, mode="blind", relevant="true", locs=(), loc_sent=(), sentences=None, **values):
+def label(
+    pid=1, mode="blind", relevant="true", locs=(), loc_sent=(), places=(), sentences=None, **values
+):
     base = {n: next(iter(f.values)) for n, f in FIELDS.items()}
     base.update(values)
     sentences = sentences or {}
@@ -37,8 +40,9 @@ def label(pid=1, mode="blind", relevant="true", locs=(), loc_sent=(), sentences=
         "fields": {
             n: {"value": v, "sentences": sentences.get(n, []), "note": ""} for n, v in base.items()
         },  # fmt: skip
-        "office_locations": list(locs),
-        "office_locations_sentences": list(loc_sent),
+        "office_cantons": list(locs),
+        "office_cantons_sentences": list(loc_sent),
+        "office_places": list(places),
     }
 
 
@@ -91,19 +95,35 @@ def test_unsure_excluded_and_relevance_threshold():
     assert ev.summarize(records, extractor=ev.RELEVANCE_EXTRACTOR, field="relevant") == (2, 2, 0)
 
 
-def test_set_match_exact_and_canton():
+def test_canton_set_exact_match_and_places():
     items = [item(1)]
-    labels = {1: label(1, locs=["city:Zürich"])}
-    exts = {"a": {1: ext(locs=["canton:ZH"])}, "b": {1: ext(locs=["city:Zürich"])},
-            "c": {1: ext(locs=["city:Zürich", "city:Winterthur"])}}  # fmt: skip
+    labels = {1: label(1, locs=["ZH"], places=["place:261:Zürich"])}
+    exts = {
+        "a": {1: ext(locs=["ZH"], places=["place:261:Zürich"])},
+        "b": {1: ext(locs=["ZH", "outside_switzerland"], places=["place:261:Zürich"])},
+        "c": {1: ext(locs=["ZH"], places=["place:261:Zürich", "place:230:Winterthur"])},
+        "old": {1: ext(locs=["ZH"]) | {"office_cantons": None}},  # run before the redesign
+    }
     records, _ = ev.score_records(items, labels, exts, {})
     s = ev.summarize
-    assert s(records, extractor="a", field="office_locations")[0] == 0
-    assert s(records, extractor="a", field="office_locations_canton")[0] == 1
-    assert s(records, extractor="b", field="office_locations")[0] == 1
-    # Winterthur is also in ZH, so canton-level still matches; exact does not
-    assert s(records, extractor="c", field="office_locations") == (0, 1, 0)
-    assert s(records, extractor="c", field="office_locations_canton") == (1, 1, 0)
+    assert s(records, extractor="a", field="office_cantons") == (1, 1, 0)
+    assert s(records, extractor="a", field="office_places") == (1, 1, 0)
+    assert s(records, extractor="b", field="office_cantons") == (0, 1, 0)  # extra set member
+    assert s(records, extractor="b", field="office_places") == (1, 1, 0)
+    assert s(records, extractor="c", field="office_cantons") == (1, 1, 0)
+    assert s(records, extractor="c", field="office_places") == (0, 1, 0)
+    assert s(records, extractor="old", field="office_cantons") == (0, 0, 0)  # skipped
+
+
+def test_canton_precision_recall():
+    items = [item(1), item(2)]
+    labels = {1: label(1, locs=["ZH", "GE"]), 2: label(2, locs=[])}
+    by_pid = {1: ext(locs=["ZH", "BE"]), 2: ext(locs=["ZH"])}
+    stats, used = ev.canton_prf(items, labels, by_pid)
+    assert used == 2
+    assert stats == {"ZH": [1, 1, 0], "GE": [0, 0, 1], "BE": [0, 1, 0]}
+    text = ev.section_cantons(items, labels, {"m": by_pid}, ["m"])
+    assert "| ZH | 50% | 100% | 1/1/0 |" in text and "| all | 33% | 50% | 1/2/1 |" in text
 
 
 def test_seniority_derived_from_both_parts():
@@ -205,5 +225,5 @@ def test_order_compare():
     assert r["work_mode"]["n"] == 2 and r["work_mode"]["changed"] == 1
     assert r["work_mode"]["directions"] == {"neutral_to_value": 1}
     assert r["german"]["directions"] == {"value_to_neutral": 1}
-    assert r["office_locations"]["directions"] == {"removed": 1}
+    assert r["office_cantons"]["directions"] == {"removed": 1}
     assert "work_mode" in ordertest.render({"reversed": r})

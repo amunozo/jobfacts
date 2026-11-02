@@ -4,8 +4,9 @@ Pure functions work on plain dicts so they can be tested without a database:
 
 - item: one line of `test_set.jsonl` (`posting_id`, `language`, `group`, `origin`, ...)
 - label: one record of `labels.jsonl` (see `jobfacts.labels`)
-- extraction ("ext"): `{"error", "values", "sentences", "office_locations",
-  "office_locations_sentences", "details", "cost_usd", "latency_ms", "tokens_in", "tokens_out"}`
+- extraction ("ext"): `{"error", "values", "sentences", "office_cantons",
+  "office_cantons_sentences", "office_places", "details", "cost_usd", "latency_ms",
+  "tokens_in", "tokens_out"}`
   as returned by `load_run`; `exts` maps extractor name -> posting id -> ext.
 """
 
@@ -17,7 +18,7 @@ from pathlib import Path
 import psycopg
 
 from jobfacts import labels as labels_mod
-from jobfacts import locations, ordertest
+from jobfacts import ordertest
 from jobfacts.extract.spec import FIELDS, derive_seniority
 from jobfacts.label_app import prefill
 
@@ -30,8 +31,8 @@ SCORED_FIELDS = [
     "relevant",
     "work_mode",
     "remote_from_switzerland",
-    "office_locations",
-    "office_locations_canton",
+    "office_cantons",
+    "office_places",
     "german",
     "french",
     "min_years",
@@ -64,16 +65,12 @@ def cell(k: int, n: int) -> str:
 # ----- scoring ----------------------------------------------------------------------------
 
 
-def canton_set(keys) -> set[str]:
-    return {locations.canton_of(k) for k in keys}
-
-
 def label_value(label: dict, field: str):
     """The labelled value of a scored field, in the form the model values are compared in."""
-    if field == "office_locations":
-        return set(label["office_locations"])
-    if field == "office_locations_canton":
-        return canton_set(label["office_locations"])
+    if field == "office_cantons":
+        return set(label["office_cantons"])
+    if field == "office_places":
+        return set(label["office_places"])
     if field == "seniority":
         f = label["fields"]
         return derive_seniority(f["min_years"]["value"], f["title_level"]["value"])
@@ -81,10 +78,8 @@ def label_value(label: dict, field: str):
 
 
 def model_value(ext: dict, field: str):
-    if field == "office_locations":
-        return set(ext["office_locations"])
-    if field == "office_locations_canton":
-        return canton_set(ext["office_locations"])
+    if field in ("office_cantons", "office_places"):
+        return set(ext[field])
     if field == "seniority":
         return derive_seniority(ext["values"]["min_years"], ext["values"]["title_level"])
     return ext["values"][field]
@@ -135,6 +130,12 @@ def score_records(
                 if ext is None:
                     counts["missing"][extractor] += 1
                     break
+                if (
+                    not ext["error"]
+                    and ext["office_cantons"] is None
+                    and field.startswith("office")
+                ):
+                    continue  # run made before the canton redesign (office_*_v1 history)
                 if ext["error"]:
                     ok, err = False, True
                 else:
@@ -183,15 +184,16 @@ def evidence_agreement(
                 hit = bool(set(ext["sentences"].get(name, [])) & set(lab["sentences"]))
                 out[(name, extractor)][0] += hit
                 out[(name, extractor)][1] += 1
-            if label["office_locations"] and set(ext["office_locations"]) == set(
-                label["office_locations"]
+            if (
+                label["office_cantons"]
+                and ext["office_cantons"] is not None
+                and set(ext["office_cantons"]) == set(label["office_cantons"])
             ):
                 hit = bool(
-                    set(ext["office_locations_sentences"])
-                    & set(label["office_locations_sentences"])
+                    set(ext["office_cantons_sentences"]) & set(label["office_cantons_sentences"])
                 )
-                out[("office_locations", extractor)][0] += hit
-                out[("office_locations", extractor)][1] += 1
+                out[("office_cantons", extractor)][0] += hit
+                out[("office_cantons", extractor)][1] += 1
     return {k: (v[0], v[1]) for k, v in out.items()}
 
 
@@ -301,11 +303,11 @@ def prefill_agreement(
                 continue
             out[(name, mode)][0] += pre["fields"][name]["value"] == label["fields"][name]["value"]
             out[(name, mode)][1] += 1
-        if "office_locations" in pre:
-            out[("office_locations", mode)][0] += set(pre["office_locations"]) == set(
-                label["office_locations"]
+        if "office_cantons" in pre:
+            out[("office_cantons", mode)][0] += set(pre["office_cantons"]) == set(
+                label["office_cantons"]
             )
-            out[("office_locations", mode)][1] += 1
+            out[("office_cantons", mode)][1] += 1
         else:
             none[mode] += 1
     return out, none
@@ -318,22 +320,23 @@ def load_run(conn: psycopg.Connection, run_id: int) -> dict[int, dict]:
     """All extraction rows of one run as ext dicts (posting id -> ext)."""
     cols = ", ".join(f"{n}, {n}_sentences" for n in FIELDS)
     rows = conn.execute(
-        f"SELECT posting_id, office_locations, details, cost_usd, latency_ms, tokens_in, "
+        f"SELECT posting_id, office_cantons, office_cantons_sentences, office_places, details, "
+        f"cost_usd, latency_ms, tokens_in, "
         f"tokens_out, error, {cols} FROM extractions WHERE run_id = %s",
         (run_id,),
     ).fetchall()
     out: dict[int, dict] = {}
-    for pid, locs, details, cost, latency, tin, tout, error, *rest in rows:
+    for pid, cantons, canton_sents, places, details, cost, latency, tin, tout, error, *rest in rows:
         values = {n: rest[2 * i] for i, n in enumerate(FIELDS)} if not error else {}
         sentences = {n: rest[2 * i + 1] or [] for i, n in enumerate(FIELDS)} if not error else {}
         out[pid] = {
             "error": error,
             "values": values,
             "sentences": sentences,
-            "office_locations": list(locs or []),
-            "office_locations_sentences": list(
-                (details or {}).get("office_locations_sentences", [])
-            ),
+            # None = run made before the canton redesign (column empty)
+            "office_cantons": None if cantons is None else list(cantons),
+            "office_cantons_sentences": list(canton_sents or []),
+            "office_places": list(places or []),
             "details": details or {},
             "cost_usd": cost,
             "latency_ms": latency,
@@ -421,7 +424,7 @@ def section_evidence(agreement, extractors) -> str:
         "sentence: share where the model's sentences share at least one sentence id with the "
         "labelled ones.\n",
     ]
-    fields = [*FIELDS, "office_locations"]
+    fields = [*FIELDS, "office_cantons"]
     rows = []
     for e in extractors:
         rows.append([e] + [cell(*agreement.get((f, e), (0, 0))) for f in fields])
@@ -491,7 +494,7 @@ def section_blind(agreement, none) -> str:
         "just that later postings are easier: the two groups hold different postings).\n",
     ]
     rows = []
-    for f in [*FIELDS, "office_locations"]:
+    for f in [*FIELDS, "office_cantons"]:
         b, p = agreement.get((f, "blind"), [0, 0]), agreement.get((f, "prefilled"), [0, 0])
         diff = f"{100 * (p[0] / p[1] - b[0] / b[1]):+.0f} pts" if b[1] and p[1] else "-"
         rows.append([f, cell(*b), cell(*p), diff])
@@ -516,6 +519,58 @@ def section_order(comparisons) -> str:
     return head + ordertest.render(comparisons)
 
 
+def canton_prf(
+    items: list[dict], labels: dict[int, dict], by_pid: dict[int, dict]
+) -> tuple[dict[str, list[int]], int]:
+    """Per canton code: [true positives, false positives, false negatives], and postings used."""
+    out: dict[str, list[int]] = defaultdict(lambda: [0, 0, 0])
+    used = 0
+    for item in items:
+        label = labels.get(item["posting_id"])
+        ext = by_pid.get(item["posting_id"])
+        if label is None or ext is None or ext["error"] or ext["office_cantons"] is None:
+            continue
+        used += 1
+        want, got = set(label["office_cantons"]), set(ext["office_cantons"])
+        for c in want | got:
+            out[c][0 if c in want and c in got else 1 if c in got else 2] += 1
+    return dict(out), used
+
+
+def _prf_cells(tp: int, fp: int, fn: int) -> list[str]:
+    precision = f"{100 * tp / (tp + fp):.0f}%" if tp + fp else "-"
+    recall = f"{100 * tp / (tp + fn):.0f}%" if tp + fn else "-"
+    return [precision, recall, f"{tp}/{fp}/{fn}"]
+
+
+def section_cantons(items, labels, exts, extractors) -> str:
+    lines = [
+        "## 8. Office cantons: precision and recall per canton",
+        "",
+        "Per canton code (and `outside_switzerland`): precision = share of the model's "
+        "postings with that canton where the label has it too; recall = share of labelled "
+        "postings with that canton where the model has it. TP/FP/FN in brackets. Only "
+        "cantons that occur in labels or answers are shown; `all` pools every canton "
+        "(micro average).\n",
+    ]
+    for e in extractors:
+        stats, used = canton_prf(items, labels, exts[e])
+        if not used:
+            continue
+        rows = []
+        total = [0, 0, 0]
+        for c in sorted(stats):
+            total = [a + b for a, b in zip(total, stats[c], strict=True)]
+            rows.append([c, *_prf_cells(*stats[c])])
+        rows.append(["all", *_prf_cells(*total)])
+        lines += [
+            f"### {e} (n={used})",
+            "",
+            table(["canton", "precision", "recall", "TP/FP/FN"], rows),
+        ]
+    return "\n".join(lines)
+
+
 NOTES = """## Notes on reading this report
 
 - **n** is the number of labelled postings behind a number. Small n means wide intervals:
@@ -527,12 +582,15 @@ NOTES = """## Notes on reading this report
   (mostly one utility), used to test the language requirement fields, so do not compare
   their relevance accuracy with `de_ai`. `app_*` groups come from the owner's applications;
   `origin` `board` are collected postings.
-- Sets (`office_locations`) must match exactly; `office_locations_canton` compares the
-  cantons only (a city counts as its canton).
+- `office_cantons` (main location metric) is the set of cantons (plus `outside_switzerland`);
+  the whole set must match exactly. Section 8 gives precision and recall per canton.
+  `office_places` (secondary) is the set of place keys code found inside the chosen cantons;
+  it is only as good as the cantons, and labels without an explicit `office_places` hold the
+  places code finds for the labelled cantons.
 - `seniority` is derived from `min_years` and `title_level` with the same rule for label and
   model, so it inherits errors of both parts.
-- Jev stores no supporting sentence for `office_locations`, so its evidence agreement there
-  is 0% by construction, not a quality result.
+- Runs made before the canton redesign (`*_v1`) have no `office_cantons`; their office rows
+  are skipped.
 - Labels are the owner's judgement, not ground truth; `relevant` is compared with the Jev
   relevance probability (>= 0.5 means relevant).
 """
@@ -544,8 +602,9 @@ NOTES = """## Notes on reading this report
 def order_comparisons(exts: dict[str, dict[int, dict]]) -> dict[str, dict]:
     if "jev" not in exts:
         return {}
+    base = exts.get("jev_v1") or exts["jev"]  # the order test ran on the pre-canton jev run
     return {
-        v: ordertest.compare(exts["jev"], exts[f"jev_{v}"])
+        v: ordertest.compare(base, exts[f"jev_{v}"])
         for v in ordertest.VARIANTS
         if f"jev_{v}" in exts
     }
@@ -577,6 +636,7 @@ def build_report(
         )
     parts.append(section_cost(exts, metas))
     if labels:
+        parts.append(section_cantons(items, labels, exts, extractors))
         agreement, none = prefill_agreement(items, labels, exts)
         parts.append(section_blind(agreement, none))
     parts.append(section_order(order_comparisons(exts)))

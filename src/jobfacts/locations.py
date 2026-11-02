@@ -1,32 +1,51 @@
-"""Find Swiss place names (cities, cantons, country words) in text.
+"""Swiss cantons and places: canton first, then place.
+
+Two jobs:
+
+1. `CANTONS` (code, names in four languages, a few major places) feeds the prompts, the
+   Jev questions and the labelling page. The model decides which cantons have an office
+   for a role (`office_cantons`).
+2. `find_places(text, cantons)` then finds the place(s) *inside the chosen cantons* by
+   matching text against the official register of localities (`config/swiss_places.csv`,
+   from swisstopo, built by `scripts/build_places.py`). `canton_hints(text)` scans the
+   whole register and suggests cantons (labelling hints, Workday URL pre-filter).
+
+Place key (stable, used in labels and the database): `place:<bfs_nr>:<name>`, where
+`bfs_nr` is the official commune number and `name` the locality or commune name as written
+in the register (`place:261:Zürich`, `place:6458:Peseux`). A name that exists in a canton
+resolves to one place: the commune of that name if there is one, else the locality with the
+largest address share. Aliases (`config/swiss_locations.toml`) add other-language names
+(Zurigo, Genf, Bâle, Sitten ...); umlaut spellings (Zuerich) and name forms without
+canton suffix or parentheses ("Pfäffikon" for "Pfäffikon ZH", "Biel" for "Biel/Bienne")
+are generated.
 
 Matching rules
-- Case-insensitive and accent-tolerant ("Zurich" = "Zürich"), whole words only.
-  Offsets always refer to the original text.
-- Longest name wins when names overlap ("Muri bei Bern" beats "Bern").
-- Exclusions for known false friends: Baden-Württemberg / Baden-Baden,
-  Freiburg im Breisgau, "New Bern", "Basel III" (banking rules).
-- Names that are also common words (config `ambiguous`: German "Zug" = train,
-  "Baden" = bathing, "Thun" = to do, ...) match in free text only when written
-  with a capital letter AND next to a location cue: a preceding "in", "at",
-  "bei", "near", "Standort:", "Kanton" ... or a following ", Switzerland" /
-  "(ZG)" style marker. With `location_field=True` (the job board's location
-  string, e.g. "Zug, Switzerland") the cue is not needed.
-- Free text: a place name must start with a capital letter.
-- Canton codes ("ZH") and "CH" are recognised only as upper-case tokens when
-  `location_field=True` ("AG" in free text means a company form). "CH" counts
-  alone; canton codes only when another Swiss candidate is present, because
-  SG, FR, GE, AR, BE ... are also other countries' codes ("Paris, FR").
+- Case-insensitive and accent-tolerant ("Neuchatel" = "Neuchâtel"); names are matched as
+  runs of words, longest run first ("Muri bei Bern" beats "Bern"). Offsets refer to the
+  original text.
+- Free text: a name must start with a capital letter. Names that are also common words
+  ("Zug" = train, "Baden" = bathing, every name of up to 4 letters except `strong`) match
+  only next to a location cue: a preceding "in", "at", "bei", "Standort:", "Kanton" ... or a
+  following ", Switzerland" / "(ZG)" marker. In a job board's location field
+  (`location_field=True`) no capital letter or cue is needed.
+- Exclusions for known false friends: Baden-Württemberg / Baden-Baden, Freiburg im
+  Breisgau, "New Bern", "Basel III", and any name followed by ", Germany" and similar.
+- Canton codes ("ZH") count only in a location field, upper-case, and only next to another
+  Swiss signal ("Paris, FR" is not Switzerland). "Swiss" is never a place.
 """
 
+import csv
 import re
 import tomllib
 import unicodedata
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
 
 CONFIG = Path(__file__).resolve().parents[2] / "config" / "swiss_locations.toml"
+PLACES_CSV = Path(__file__).resolve().parents[2] / "config" / "swiss_places.csv"
+
+OUTSIDE = "outside_switzerland"
 
 _CUE_BEFORE = re.compile(
     r"(?:\b(?:in|at|near|bei|nach|aus|from|to|auf|und|and|oder|or|à|a|vers|de|di)"
@@ -36,8 +55,12 @@ _CUE_BEFORE = re.compile(
 _CUE_AFTER = re.compile(
     r"^\s*(?:[,(/|-]\s*)(?:switzerland|schweiz|suisse|svizzera|ch\b|[a-z]{2}\))"
 )
-_CODE_CUE_AFTER = re.compile(r"^\s*\(?(?:[A-Z]{2})\)")
-# name (normalised) -> (regex on text before, regex on text after) that cancels the match
+_ABROAD_AFTER = re.compile(
+    r"^\s*,\s*(?:germany|deutschland|austria|osterreich|france|frankreich|italy|italien|"
+    r"liechtenstein)"
+)
+# name (normalised, words joined by a space) -> (regex on text before, regex on text after)
+# that cancels the match
 _EXCLUDE: dict[str, tuple[str | None, str | None]] = {
     "baden": (
         r"(?:new|north|south)\s+$",
@@ -50,16 +73,9 @@ _EXCLUDE: dict[str, tuple[str | None, str | None]] = {
     "bern": (r"(?:new|north|south)\s+$", None),
     "basel": (None, r"^\s*(?:iii|iv|3|ii|2)\b"),
 }
-
-
-@dataclass(frozen=True)
-class Candidate:
-    key: str  # "city:Zürich", "canton:ZH" or "country:CH"
-    kind: str  # "city" | "canton" | "country"
-    canton: str | None
-    matched: str
-    start: int
-    end: int
+_TOKEN = re.compile(r"[^\W_]+")
+_GAP = re.compile(r"[\s\-./'’]{1,3}")
+_COUNTRY_CODE = re.compile(r"(?<![^\W_])[A-Z]{2,3}(?![^\W_])")
 
 
 def _norm_char(ch: str) -> str:
@@ -73,38 +89,227 @@ def normalize(text: str) -> str:
     return "".join(_norm_char(c) for c in text)
 
 
+def _tokens(name: str) -> tuple[str, ...]:
+    return tuple(_TOKEN.findall(normalize(name)))
+
+
+# ----- cantons ----------------------------------------------------------------------------
+
+
 @dataclass(frozen=True)
-class _Entry:
+class Canton:
+    code: str
+    de: str
+    fr: str
+    it: str
+    en: str
+    other: tuple[str, ...]
+    places: tuple[str, ...]  # a few major places, for prompts and criteria
+
+    @property
+    def names(self) -> tuple[str, ...]:
+        return tuple(dict.fromkeys([self.de, self.fr, self.it, self.en, *self.other]))
+
+
+@dataclass(frozen=True)
+class Place:
+    key: str  # place:<bfs_nr>:<name>
+    name: str  # locality or commune name as in the register
+    commune: str
+    bfs_nr: int
+    canton: str
+    postcodes: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class PlaceMatch:
     key: str
-    kind: str
-    canton: str | None
+    name: str
+    commune: str
+    bfs_nr: int
+    canton: str
+    matched: str  # the text as written
+    start: int
+    end: int
+
+
+@dataclass
+class _Name:
     ambiguous: bool
+    places: dict[str, Place] = field(default_factory=dict)  # canton -> place
+    score: dict[str, tuple] = field(default_factory=dict)
+    named: set[str] = field(default_factory=set)  # cantons whose name this is
+
+
+@dataclass
+class _Index:
+    names: dict[tuple[str, ...], _Name]
+    max_len: int
+    places: dict[str, Place]
+    countries: re.Pattern
+    country_codes: set[str]
+    cantons: dict[str, Canton]
+
+
+def _base_name(name: str, canton: str) -> str:
+    base = re.sub(r"\s*\([^)]*\)", "", name).strip()
+    return base[: -len(canton)].strip() if base.endswith(f" {canton}") else base
+
+
+def _variants(name: str, canton: str) -> list[str]:
+    """Written forms generated from a register name (the name itself comes first)."""
+    out = [name]
+    base = re.sub(r"\s*\([^)]*\)", "", name).strip()
+    if base != name:
+        out.append(base)
+    if base.endswith(f" {canton}"):
+        out.append(base[: -len(canton)].strip())
+    for v in list(out):
+        if "/" in v:
+            out += [part.strip() for part in v.split("/")]
+    for v in list(out):
+        t = v.replace("ä", "ae").replace("ö", "oe").replace("ü", "ue")
+        t = t.replace("Ä", "Ae").replace("Ö", "Oe").replace("Ü", "Ue")
+        if t != v:
+            out.append(t)
+    return list(dict.fromkeys(out))
 
 
 @lru_cache(maxsize=1)
-def _load(path: Path = CONFIG):
-    data = tomllib.loads(path.read_text(encoding="utf-8"))
-    ambiguous = {normalize(a) for a in data["ambiguous"]}
-    names: dict[str, _Entry] = {}
+def _load() -> _Index:
+    data = tomllib.loads(CONFIG.read_text(encoding="utf-8"))
+    ambiguous = {" ".join(_tokens(a)) for a in [*data["ambiguous"], *data["common_words"]]}
+    strong = {" ".join(_tokens(a)) for a in data["strong"]}
+    cantons = {
+        row["code"]: Canton(
+            row["code"],
+            row["de"],
+            row["fr"],
+            row["it"],
+            row["en"],
+            tuple(row["other"]),
+            tuple(row["places"]),
+        )
+        for row in data["cantons"]
+    }
 
-    def add(name: str, key: str, kind: str, canton: str | None) -> None:
-        n = normalize(name)
-        names[n] = _Entry(key, kind, canton, n in ambiguous)
+    def is_ambiguous(tkey: tuple[str, ...]) -> bool:
+        joined = " ".join(tkey)
+        if joined in strong:
+            return False
+        return joined in ambiguous or (len(tkey) == 1 and len(tkey[0]) <= 4)
 
-    for code, name, others in data["cantons"]:
-        for n in [name, *others]:
-            add(n, f"canton:{code}", "canton", code)
-    for city, code, variants in data["places"]:  # cities override same-named cantons
-        for n in [city, *variants]:
-            add(n, f"city:{city}", "city", code)
-    for c in data["country"]:
-        add(c, "country:CH", "country", None)
-    # non-ambiguous canton names double as cities when a city entry exists; fine as is.
-    ordered = sorted(names, key=len, reverse=True)
-    pattern = "|".join(re.escape(n).replace(r"\ ", r"\s+") for n in ordered)
-    regex = re.compile(rf"(?<![^\W_])(?:{pattern})(?![^\W_])")
-    codes = {c for c, *_ in data["cantons"]}
-    return regex, names, codes, set(data["country_codes"])
+    names: dict[tuple[str, ...], _Name] = {}
+
+    def entry(tkey: tuple[str, ...]) -> _Name:
+        if tkey not in names:
+            names[tkey] = _Name(is_ambiguous(tkey))
+        return names[tkey]
+
+    # places from the register: (bfs, base name) -> data; the base name has no "(ZH)" or
+    # trailing canton code, so "Pfäffikon ZH" and the commune "Pfäffikon" are one place
+    raw: dict[tuple[int, str], dict] = {}
+    with PLACES_CSV.open(encoding="utf-8", newline="") as f:
+        rows = csv.DictReader(line for line in f if not line.startswith("#"))
+        for r in rows:
+            bfs = int(r["bfs_nr"])
+            share = float(r["share"] or 0)
+            for name, is_commune in ((r["locality"], False), (r["commune"], True)):
+                p = raw.setdefault(
+                    (bfs, _base_name(name, r["canton"])),
+                    {
+                        "commune": r["commune"],
+                        "canton": r["canton"],
+                        "pc": set(),
+                        "share": 0.0,
+                        "names": set(),
+                    },
+                )
+                p["pc"].add(r["postcode"])
+                p["names"].add(name)
+                p["share"] += 1000.0 if is_commune else share
+    places: dict[str, Place] = {}
+    for (bfs, base), p in raw.items():
+        commune = _base_name(p["commune"], p["canton"])
+        place = Place(
+            f"place:{bfs}:{base}", base, commune, bfs, p["canton"], tuple(sorted(p["pc"]))
+        )
+        places[place.key] = place
+        main = base == commune
+        for name in sorted(p["names"]):
+            for variant in _variants(name, p["canton"]):
+                tkey = _tokens(variant)
+                if not tkey:
+                    continue
+                e = entry(tkey)
+                score = (variant == base, main, p["share"])
+                if place.canton not in e.score or score > e.score[place.canton]:
+                    e.score[place.canton] = score
+                    e.places[place.canton] = place
+    # A postal locality can spill a few addresses into another canton (St. Gallen 9012
+    # reaches Teufen AR with 3% of its addresses). Drop such fragments when the same name
+    # is a commune or a major locality elsewhere, so "St. Gallen" does not hint AR.
+    for e in names.values():
+        if len(e.score) < 2:
+            continue
+        strong = [c for c, (_, main, share) in e.score.items() if main or share >= 50]
+        if not strong:
+            continue
+        for c in [c for c, (_, main, share) in e.score.items() if not main and share < 10]:
+            if c not in strong:
+                del e.score[c], e.places[c]
+    for alias, canton, target in data["aliases"]:
+        place = names.get(_tokens(target), _Name(False)).places.get(canton)
+        if place is None:
+            raise ValueError(f"alias {alias!r}: no place {target!r} in canton {canton}")
+        e = entry(_tokens(alias))
+        e.ambiguous = (
+            " ".join(_tokens(alias)) in ambiguous
+        )  # the short-name rule is for the register
+        e.places[canton] = place
+        e.score[canton] = (True, True, 1e9)
+    for c in cantons.values():
+        for n in c.names:
+            e = entry(_tokens(n))
+            e.ambiguous = " ".join(_tokens(n)) in ambiguous
+            e.named.add(c.code)
+    country_words = sorted((" ".join(_tokens(c)) for c in data["country"]), key=len, reverse=True)
+    countries = re.compile(
+        r"(?<![^\W_])(?:" + "|".join(re.escape(c) for c in country_words) + r")(?![^\W_])"
+    )
+    return _Index(
+        names,
+        max(len(k) for k in names),
+        places,
+        countries,
+        set(data["country_codes"]),
+        cantons,
+    )
+
+
+CANTONS: dict[str, Canton] = _load().cantons
+
+
+def canton_name(code: str, lang: str = "en") -> str:
+    """Name of a canton in `de`, `fr`, `it` or `en`."""
+    return getattr(CANTONS[code], lang)
+
+
+def office_canton_values() -> list[str]:
+    """Every value `office_cantons` may contain: the 26 codes and `outside_switzerland`."""
+    return [*CANTONS, OUTSIDE]
+
+
+def all_place_keys() -> set[str]:
+    """Every place key a label may use."""
+    return set(_load().places)
+
+
+def place_by_key(key: str) -> Place | None:
+    return _load().places.get(key)
+
+
+# ----- scanning ---------------------------------------------------------------------------
 
 
 def _has_cue(norm: str, start: int, end: int) -> bool:
@@ -113,64 +318,124 @@ def _has_cue(norm: str, start: int, end: int) -> bool:
     )
 
 
-def find_candidates(text: str, *, location_field: bool = False) -> list[Candidate]:
-    """Return Swiss place candidates in `text`, in text order, non-overlapping."""
-    regex, names, codes, country_codes = _load()
+@dataclass(frozen=True)
+class _Hit:
+    name: _Name
+    start: int
+    end: int
+
+
+def _scan(text: str, location_field: bool) -> list[_Hit]:
+    """Register/canton-name matches in text order, non-overlapping, longest run first."""
+    index = _load()
     norm = normalize(text)
-    out: list[Candidate] = []
-    for m in regex.finditer(norm):
-        name = m.group()
-        entry = names[re.sub(r"\s+", " ", name)]
-        start, end = m.span()
-        rule = _EXCLUDE.get(name)
-        if rule:
-            before, after = rule
-            if before and re.search(before, norm[max(0, start - 10) : start]):
+    toks = [(m.group(), m.start(), m.end()) for m in _TOKEN.finditer(norm)]
+    hits: list[_Hit] = []
+    i = 0
+    while i < len(toks):
+        reach = 1  # how many words can be joined starting here
+        while (
+            reach < index.max_len
+            and i + reach < len(toks)
+            and _GAP.fullmatch(norm[toks[i + reach - 1][2] : toks[i + reach][1]])
+        ):
+            reach += 1
+        matched = False
+        for n in range(reach, 0, -1):
+            tkey = tuple(t[0] for t in toks[i : i + n])
+            name = index.names.get(tkey)
+            if name is None:
                 continue
-            if after and re.search(after, norm[end : end + 25]):
+            start, end = toks[i][1], toks[i + n - 1][2]
+            rule = _EXCLUDE.get(" ".join(tkey))
+            if rule:
+                before, after = rule
+                if before and re.search(before, norm[max(0, start - 10) : start]):
+                    continue
+                if after and re.search(after, norm[end : end + 25]):
+                    continue
+            if _ABROAD_AFTER.search(norm[end : end + 25]):
                 continue
-        if not location_field:
-            if not text[start].isupper():
+            if not location_field and (
+                not text[start].isupper() or (name.ambiguous and not _has_cue(norm, start, end))
+            ):
                 continue
-            if entry.ambiguous and not _has_cue(norm, start, end):
-                continue
-            if name == "swiss":  # an adjective ("Swiss banks", "Swiss Re"), not a place
-                continue
-        out.append(Candidate(entry.key, entry.kind, entry.canton, text[start:end], start, end))
-    if (
-        location_field
-    ):  # codes count only next to another Swiss signal (SG, FR, GE = other countries)
-        codes_found: list[Candidate] = []
-        taken = [(c.start, c.end) for c in out]
-        for m in re.finditer(r"(?<![^\W_])[A-Z]{2,3}(?![^\W_])", text):
-            if any(s <= m.start() < e for s, e in taken):
-                continue
-            tok = m.group()
-            if tok in country_codes:
-                out.append(Candidate("country:CH", "country", None, tok, *m.span()))
-            elif tok in codes and len(tok) == 2:
-                codes_found.append(Candidate(f"canton:{tok}", "canton", tok, tok, *m.span()))
-        if out:
-            out.extend(codes_found)
-        out.sort(key=lambda c: c.start)
+            hits.append(_Hit(name, start, end))
+            i += n
+            matched = True
+            break
+        if not matched:
+            i += 1
+    return hits
+
+
+def find_places(
+    text: str, cantons: list[str] | set[str] | tuple[str, ...], *, location_field: bool = False
+) -> list[PlaceMatch]:
+    """Places named in `text` that lie in one of `cantons`, in text order.
+
+    Only register places count (canton names like "Kanton Aargau" are not places). A name
+    that exists in several chosen cantons gives one match per canton. `OUTSIDE` and unknown
+    codes in `cantons` are ignored. The same place may be found several times; every
+    occurrence is returned.
+    """
+    wanted = [c for c in dict.fromkeys(cantons) if c in CANTONS]
+    if not wanted:
+        return []
+    out: list[PlaceMatch] = []
+    for hit in _scan(text, location_field):
+        for c in wanted:
+            p = hit.name.places.get(c)
+            if p:
+                out.append(
+                    PlaceMatch(
+                        p.key,
+                        p.name,
+                        p.commune,
+                        p.bfs_nr,
+                        c,
+                        text[hit.start : hit.end],
+                        hit.start,
+                        hit.end,
+                    )  # fmt: skip
+                )
     return out
 
 
-def all_keys() -> set[str]:
-    """Every location key a label may use: cities, cantons, the country, outside_switzerland."""
-    _, names, _, _ = _load()
-    return {e.key for e in names.values()} | {"outside_switzerland"}
+def _country_signal(text: str, location_field: bool) -> bool:
+    index = _load()
+    for m in index.countries.finditer(normalize(text)):
+        if location_field or (text[m.start()].isupper() and m.group() != "swiss"):
+            return True
+    return location_field and any(
+        m.group() in index.country_codes for m in _COUNTRY_CODE.finditer(text)
+    )
 
 
-def canton_of(key: str) -> str:
-    """Canton code of a location key (`city:Zürich` -> `ZH`, `canton:ZH` -> `ZH`).
+def canton_hints(text: str, *, location_field: bool = False) -> list[str]:
+    """Cantons suggested by names in `text` (whole register, canton names, location codes).
 
-    `country:CH` and `outside_switzerland` stay as they are; unknown keys too.
+    Order of first appearance. A name that exists in several cantons ("Pfäffikon", "Buchs")
+    suggests all of them. In a location field a two-letter canton code ("SG") counts when
+    another Swiss signal (a place, a canton name, "Switzerland", "CH") is present.
     """
-    if key.startswith("canton:"):
-        return key.removeprefix("canton:")
-    _, names, _, _ = _load()
-    for entry in names.values():
-        if entry.key == key and entry.canton:
-            return entry.canton
-    return key
+    hits = _scan(text, location_field)
+    found: list[str] = []
+    for h in hits:
+        for c in sorted(set(h.name.places) | h.name.named):
+            if c not in found:
+                found.append(c)
+    if location_field and (hits or _country_signal(text, True)):
+        taken = [(h.start, h.end) for h in hits]
+        for m in _COUNTRY_CODE.finditer(text):
+            if m.group() in CANTONS and not any(s <= m.start() < e for s, e in taken):
+                if m.group() not in found:
+                    found.append(m.group())
+    return found
+
+
+def mentions_switzerland(text: str, *, location_field: bool = False) -> bool:
+    """True if `text` names a Swiss place, a canton, or the country."""
+    return bool(canton_hints(text, location_field=location_field)) or _country_signal(
+        text, location_field
+    )

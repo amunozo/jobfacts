@@ -15,10 +15,11 @@ from typing import Any
 from dotenv import load_dotenv
 from openai import OpenAI
 
+from jobfacts import locations
 from jobfacts.extract.base import Result
 from jobfacts.extract.jev import build_state
 from jobfacts.extract.posting import PostingText, parse_label
-from jobfacts.extract.spec import FIELDS, GENERAL_RULES, spec_hash
+from jobfacts.extract.spec import FIELDS, GENERAL_RULES, OFFICE_CANTONS, spec_hash
 
 SYSTEM_TEMPLATE = """You extract facts from one job posting. {rules}
 
@@ -31,13 +32,18 @@ one id, using only ids that exist.
 Fields and allowed values:
 {fields}
 
-office_locations: below the posting you get a list of candidate places (key: matched \
-text). Return the keys of the candidates that are an office location for this role, \
-with supporting ids. Return an empty list if none is.
+office_cantons: the Swiss cantons in which the posting names an office or work \
+location for this role (a city, town or village counts for its canton; use your \
+knowledge of Swiss geography), as a list of canton codes, plus "outside_switzerland" if \
+an office outside Switzerland is named. An empty list means the posting names no office \
+location. Do not include places mentioned only for other reasons (company history, \
+customers, other roles, travel). Give at least one supporting id when the list is not \
+empty. Cantons (code: name, some major places):
+{cantons}
 
 Reply with one JSON object and nothing else, in this shape:
 {{"work_mode": {{"value": "...", "sentences": ["S004"]}}, ..., \
-"office_locations": {{"value": ["city:Zürich"], "sentences": ["L"]}}}}
+"office_cantons": {{"value": ["ZH", "outside_switzerland"], "sentences": ["L"]}}}}
 The object must have exactly these keys: {keys}."""
 
 
@@ -49,15 +55,22 @@ def render_fields() -> str:
     return "\n".join(out)
 
 
+def render_cantons() -> str:
+    return "\n".join(
+        f"- {c.code}: {c.en} / {c.de} / {c.fr} / {c.it}; {', '.join(c.places)}"
+        for c in locations.CANTONS.values()
+    )
+
+
 def system_prompt() -> str:
-    keys = ", ".join([*FIELDS, "office_locations"])
-    return SYSTEM_TEMPLATE.format(rules=GENERAL_RULES, fields=render_fields(), keys=keys)
+    keys = ", ".join([*FIELDS, OFFICE_CANTONS])
+    return SYSTEM_TEMPLATE.format(
+        rules=GENERAL_RULES, fields=render_fields(), keys=keys, cantons=render_cantons()
+    )
 
 
 def user_prompt(p: PostingText) -> str:
-    cands = p.candidates()
-    listing = "\n".join(f"- {c.key}: {c.matched} (in {where})" for c, where in cands)
-    return f"{build_state(p)}\n\nCandidate places:\n{listing or '(none)'}"
+    return build_state(p)
 
 
 def _parse_ids(raw: Any, p: PostingText, name: str) -> list[int]:
@@ -73,11 +86,11 @@ def _parse_ids(raw: Any, p: PostingText, name: str) -> list[int]:
     return ids
 
 
-def validate(obj: Any, p: PostingText, candidate_keys: set[str]) -> Result:
+def validate(obj: Any, p: PostingText) -> Result:
     """Check model output against the spec. Raises ValueError with a readable message."""
     if not isinstance(obj, dict):
         raise ValueError("the reply must be a JSON object")
-    missing = [k for k in [*FIELDS, "office_locations"] if k not in obj]
+    missing = [k for k in [*FIELDS, OFFICE_CANTONS] if k not in obj]
     if missing:
         raise ValueError(f"missing keys: {', '.join(missing)}")
     result = Result()
@@ -93,14 +106,20 @@ def validate(obj: Any, p: PostingText, candidate_keys: set[str]) -> Result:
         result.sentences[f.name] = [] if value in f.no_quote else ids
         if value not in f.no_quote and not ids:
             result.details.setdefault("missing_quote", []).append(f.name)
-    entry = obj["office_locations"]
+    entry = obj[OFFICE_CANTONS]
     if not isinstance(entry, dict) or not isinstance(entry.get("value"), list):
-        raise ValueError('office_locations must be {"value": [keys], "sentences": [...]}')
-    for key in entry["value"]:
-        if key not in candidate_keys:
-            raise ValueError(f"office_locations: {key!r} is not one of the candidates")
-    result.office_locations = list(dict.fromkeys(entry["value"]))
-    result.sentences["office_locations"] = _parse_ids(entry.get("sentences", []), p, "office")
+        raise ValueError(f'{OFFICE_CANTONS} must be {{"value": [codes], "sentences": [...]}}')
+    allowed = locations.office_canton_values()
+    for code in entry["value"]:
+        if code not in allowed:
+            raise ValueError(
+                f"{OFFICE_CANTONS}: {code!r} is not a canton code or outside_switzerland"
+            )
+    result.office_cantons = list(dict.fromkeys(entry["value"]))
+    ids = _parse_ids(entry.get("sentences", []), p, OFFICE_CANTONS)
+    result.sentences[OFFICE_CANTONS] = ids if result.office_cantons else []
+    if result.office_cantons and not ids:
+        result.details.setdefault("missing_quote", []).append(OFFICE_CANTONS)
     return result
 
 
@@ -137,7 +156,6 @@ class LLMExtractor:
         )
 
     def extract(self, p: PostingText) -> Result:
-        keys = {c.key for c, _ in p.candidates()}
         messages = [
             {"role": "system", "content": system_prompt()},
             {"role": "user", "content": user_prompt(p)},
@@ -158,7 +176,7 @@ class LLMExtractor:
                 tokens_out += response.usage.completion_tokens
             raw = response.choices[0].message.content or ""
             try:
-                result = validate(parse_json(raw), p, keys)
+                result = validate(parse_json(raw), p)
                 last_error = ""
                 result.details["attempts"] = attempt + 1
                 break

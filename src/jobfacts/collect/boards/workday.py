@@ -26,7 +26,7 @@ import httpx
 
 from jobfacts.collect.http import USER_AGENT, _get
 from jobfacts.collect.posting import BoardRead, Posting, parse_time
-from jobfacts.locations import find_candidates
+from jobfacts.locations import mentions_switzerland
 from jobfacts.text import html_to_text
 
 _NS = "{http://www.sitemaps.org/schemas/sitemap/0.9}"
@@ -123,7 +123,7 @@ def url_is_candidate(url: str) -> bool:
     """True if the URL's location segment names a Swiss place or says remote."""
     text = url_location_text(url)
     return bool(text) and (
-        bool(find_candidates(text, location_field=True)) or bool(_REMOTE.search(text))
+        mentions_switzerland(text, location_field=True) or bool(_REMOTE.search(text))
     )
 
 

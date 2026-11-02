@@ -15,10 +15,12 @@ def posting(description: str = DESCRIPTION, location: str = "Zürich, Switzerlan
 
 
 class FakeJev:
-    """Answers every Choice with its first option (or `pick[name]`) and every Noul with 0.9."""
+    """Answers every Choice with its first option (or `pick[name]`) and every Noul with `noul`
+    (default 0.9; `noul_pick[name]` overrides one question)."""
 
-    def __init__(self, pick=None, noul=0.9):
+    def __init__(self, pick=None, noul=0.9, noul_pick=None):
         self.pick, self.noul, self.calls = pick or {}, noul, []
+        self.noul_pick = noul_pick or {}
 
     def system_one(self, state, questions, model=None):
         self.calls.append((state, questions, model))
@@ -32,7 +34,7 @@ class FakeJev:
                 }
                 answers[name] = SimpleNamespace(choice=choice, probabilities=probs, confidence=0.5)
             else:
-                answers[name] = SimpleNamespace(noul=self.noul)
+                answers[name] = SimpleNamespace(noul=self.noul_pick.get(name, self.noul))
         return SimpleNamespace(
             answers=answers, usage=SimpleNamespace(input_tokens=1000, output_tokens=5), model="x"
         )

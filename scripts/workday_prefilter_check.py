@@ -12,7 +12,7 @@ import tomllib
 from jobfacts.collect.boards import workday
 from jobfacts.collect.http import USER_AGENT, _get, make_client
 from jobfacts.collect.store import EMPLOYERS_FILE
-from jobfacts.locations import find_candidates
+from jobfacts.locations import mentions_switzerland
 
 SAMPLE = 20
 
@@ -35,7 +35,7 @@ def check(entry: dict) -> None:
             errors += 1
             continue
         if (
-            find_candidates(posting.location_raw, location_field=True)
+            mentions_switzerland(posting.location_raw, location_field=True)
             or "Remote" in posting.location_raw
         ):
             hits.append((workday.url_location_text(url), posting.location_raw))

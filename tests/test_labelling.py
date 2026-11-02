@@ -23,7 +23,12 @@ GOOD = {
 def payload(**overrides):
     fields = {k: {"value": v, "sentences": s} for k, (v, s) in GOOD.items()}
     fields.update(overrides)
-    return {"fields": fields, "relevant": "true", "office_locations": ["city:Zürich"]}
+    return {
+        "fields": fields,
+        "relevant": "true",
+        "office_cantons": ["ZH"],
+        "office_cantons_sentences": [3],
+    }
 
 
 def item(pid, order, language="en"):
@@ -51,8 +56,8 @@ def extraction(**values):
     return {
         "values": base,
         "sentences": {n: ([1] if v not in FIELDS[n].no_quote else []) for n, v in base.items()},
-        "office_locations": ["city:Zürich"],
-        "office_locations_sentences": [3],
+        "office_cantons": ["ZH"],
+        "office_cantons_sentences": [3],
     }
 
 
@@ -81,7 +86,7 @@ def test_validation_errors(client):
         french={"value": "not_mentioned", "sentences": [1]},
     )
     bad["relevant"] = "maybe"
-    bad["office_locations"] = ["city:Atlantis"]
+    bad["office_cantons"] = ["XX"]
     r = client.put("/api/items/1/label", json=bad)
     assert r.status_code == 422
     errors = r.json()["errors"]
@@ -91,7 +96,7 @@ def test_validation_errors(client):
         "german",
         "french",
         "relevant",
-        "office_locations",
+        "office_cantons",
     }
     assert not client.labels_path.exists()  # nothing written
 
@@ -121,7 +126,18 @@ def test_latest_wins_and_append_only(client):
 def test_blind_shows_no_model_output(client):
     r = client.get("/api/items/1").json()  # order 0 < blind_count, and it has an extraction
     assert r["mode"] == "blind" and r["prefill"] is None
-    assert [c["key"] for c in r["location_candidates"]][0] == "city:Zürich"
+    assert r["canton_hints"] == ["ZH"]
+    assert r["place_candidates"] == {
+        "ZH": [
+            {
+                "key": "place:261:Zürich",
+                "name": "Zürich",
+                "commune": "Zürich",
+                "matched": "Zürich",
+                "where": "location field",
+            }  # fmt: skip
+        ]
+    }
     assert {f["name"] for f in r["fields"]} == set(FIELDS)
 
 
@@ -152,10 +168,15 @@ def test_prefill_sentences_and_locations():
     c["sentences"]["work_mode"] = [5]
     pre = prefill.majority({"a": a, "b": b, "c": c})
     assert pre["fields"]["work_mode"]["sentences"] == [2]  # chosen by at least two
-    assert pre["office_locations"] == ["city:Zürich"]
-    b["office_locations"] = ["city:Bern"]
-    c["office_locations"] = ["canton:GE"]
-    assert prefill.majority({"a": a, "b": b, "c": c}).get("office_locations") is None
+    assert pre["office_cantons"] == ["ZH"] and pre["office_cantons_sentences"] == [3]
+    b["office_cantons"] = ["BE"]
+    c["office_cantons"] = ["GE", "outside_switzerland"]
+    assert prefill.majority({"a": a, "b": b, "c": c}).get("office_cantons") is None
+    b["office_cantons"] = ["outside_switzerland", "GE"]  # sets, not lists, are compared
+    assert prefill.majority({"a": a, "b": b, "c": c})["office_cantons"] == [
+        "GE",
+        "outside_switzerland",
+    ]
 
 
 def test_prefilled_item_via_api(tmp_path):
@@ -170,6 +191,8 @@ def test_prefilled_item_via_api(tmp_path):
     r = c.get("/api/items/1").json()
     assert r["mode"] == "prefilled"
     assert r["prefill"]["fields"]["work_mode"]["value"] == "hybrid"
+    assert r["prefill"]["office_cantons"] == ["ZH"]
+    assert r["prefill"]["office_places"] == ["place:261:Zürich"]
     assert c.put("/api/items/1/label", json=payload()).json()["saved"]["mode"] == "prefilled"
 
 
@@ -192,7 +215,42 @@ def test_spec_endpoint(client):
     spec = client.get("/api/spec").json()
     work = next(f for f in spec["fields"] if f["name"] == "work_mode")
     assert {v["value"] for v in work["values"]} == set(FIELDS["work_mode"].values)
-    assert "outside_switzerland" in spec["location_keys"]
+    assert spec["outside_value"] == "outside_switzerland"
+    assert len(spec["cantons"]) == 26
+    zh = spec["cantons"][0]
+    assert zh["code"] == "ZH" and zh["name_de"] == "Zürich" and zh["name_it"] == "Zurigo"
+    assert "Winterthur" in zh["places"]
+
+
+def test_office_places_default_and_validation(client):
+    r = client.put("/api/items/1/label", json=payload())
+    assert r.json()["saved"]["office_places"] == ["place:261:Zürich"]  # filled in by code
+    own = payload() | {"office_places": []}
+    assert client.put("/api/items/1/label", json=own).json()["saved"]["office_places"] == []
+    bad = payload() | {"office_places": ["place:351:Bern"]}
+    errors = client.put("/api/items/1/label", json=bad).json()["errors"]
+    assert "outside the chosen cantons" in errors["office_places"]
+    bad = payload() | {"office_places": ["place:0:Nowhere"]}
+    assert (
+        "unknown place keys"
+        in client.put("/api/items/1/label", json=bad).json()["errors"]["office_places"]
+    )
+
+
+def test_office_cantons_evidence_rules(client):
+    no_evidence = payload() | {"office_cantons_sentences": []}
+    assert (
+        "office_cantons_sentences"
+        in client.put("/api/items/1/label", json=no_evidence).json()["errors"]
+    )
+    stated_none = payload() | {"office_cantons": [], "office_cantons_sentences": []}
+    saved = client.put("/api/items/1/label", json=stated_none).json()["saved"]
+    assert saved["office_cantons"] == [] and saved["office_places"] == []
+    outside = payload() | {"office_cantons": ["outside_switzerland", "ZH"]}
+    assert client.put("/api/items/1/label", json=outside).json()["saved"]["office_cantons"] == [
+        "ZH",
+        "outside_switzerland",
+    ]
 
 
 def test_build_app_reads_and_writes_the_given_data_dir(tmp_path, conn):
@@ -204,3 +262,9 @@ def test_build_app_reads_and_writes_the_given_data_dir(tmp_path, conn):
     assert [x["posting_id"] for x in c.get("/api/items").json()] == [1]
     assert c.put("/api/items/1/label", json=payload()).status_code == 200
     assert len(labels.load_all(tmp_path / "labels.jsonl")) == 1
+
+
+def test_prefill_ignores_old_and_variant_runs():
+    from jobfacts.label_app import server
+
+    assert server.PREFILL_EXTRACTORS == ("jev", "deepseek", "mistral")

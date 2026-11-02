@@ -5,16 +5,16 @@
 // ---------------------------------------------------------------- constants
 
 const ORDER = [
-  "relevant", "work_mode", "remote_from_switzerland", "office_locations",
+  "relevant", "work_mode", "remote_from_switzerland", "office_cantons",
   "german", "french", "min_years", "title_level",
 ];
 const LABEL = {
   relevant: "Relevant", work_mode: "Work mode", remote_from_switzerland: "Remote from CH",
-  office_locations: "Office locations", german: "German", french: "French",
+  office_cantons: "Office locations", german: "German", french: "French",
   min_years: "Min. years", title_level: "Title level",
 };
 const ABBR = {
-  work_mode: "MODE", remote_from_switzerland: "RCH", office_locations: "LOC",
+  work_mode: "MODE", remote_from_switzerland: "RCH", office_cantons: "LOC",
   german: "DE", french: "FR", min_years: "YRS", title_level: "TTL",
 };
 const RELEVANT_DEFS = {
@@ -27,7 +27,7 @@ const HINTS = {
   relevant: "Is this an AI, ML, data or research role?",
   work_mode: "Occasional travel or offsites still count as remote.",
   remote_from_switzerland: "Only for remote roles; any other work mode is not_applicable.",
-  office_locations: "Offices for this role only. Toggle candidates (1–9, 0 = outside CH), add others with /. Leave empty when no office is named, then Enter.",
+  office_cantons: "Offices for this role only (not history, customers or travel); a town counts for its canton. Nothing selected = not stated.",
   german: "A posting written in German does not by itself require German. “German or French” → either_required in both.",
   french: "A posting written in French does not by itself require French. “German or French” → either_required in both.",
   min_years: "A range uses the minimum (“3–5 years” → 3). “PhD or 3 years” → 3. Type the number; N = not stated, + = 15_plus.",
@@ -52,7 +52,9 @@ const S = {
   sentEls: new Map(),  // sentence id -> element
   ybuf: "", ytimer: null,
   yhover: null,
-  locQuery: "",
+  locQuery: "",        // canton filter text (office field)
+  locSel: 0,           // index of the highlighted match in the filter
+  cantonBy: {},        // canton code -> /api/spec canton
   noteOpen: {},        // field name (or "_posting") -> bool
 };
 
@@ -96,7 +98,8 @@ function emptyForm() {
   for (const name of ORDER) {
     f[name] = { value: null, sentences: new Set(), note: "", status: "empty" };
   }
-  f.office_locations.keys = new Set();
+  f.office_cantons.cantons = new Set();
+  f.office_cantons.places = new Set();
   f._note = "";
   return f;
 }
@@ -111,19 +114,26 @@ function formFromItem(item) {
       if (!f[name]) continue;
       Object.assign(f[name], { value: e.value, sentences: new Set(e.sentences || []), note: e.note || "", status: "set" });
     }
-    f.office_locations.keys = new Set(label.office_locations || []);
-    f.office_locations.sentences = new Set(label.office_locations_sentences || []);
-    f.office_locations.status = "set";
+    // Labels saved before the canton-first fields have no office_cantons: leave that field open.
+    if (Array.isArray(label.office_cantons)) {
+      const o = f.office_cantons;
+      o.cantons = new Set(label.office_cantons);
+      o.places = new Set(label.office_places || []);
+      o.sentences = new Set(label.office_cantons_sentences || []);
+      o.status = "set";
+    }
     f._note = label.note || "";
   } else if (item.prefill) {
     for (const [name, e] of Object.entries(item.prefill.fields || {})) {
       if (!f[name]) continue;
       Object.assign(f[name], { value: e.value, sentences: new Set(e.sentences || []), status: "suggested" });
     }
-    if (item.prefill.office_locations) {
-      f.office_locations.keys = new Set(item.prefill.office_locations);
-      f.office_locations.sentences = new Set(item.prefill.office_locations_sentences || []);
-      f.office_locations.status = "suggested";
+    if (Array.isArray(item.prefill.office_cantons)) {
+      const o = f.office_cantons;
+      o.cantons = new Set(item.prefill.office_cantons);
+      o.places = new Set(item.prefill.office_places || []);
+      o.sentences = new Set(item.prefill.office_cantons_sentences || []);
+      o.status = "suggested";
     }
   }
   return f;
@@ -134,7 +144,7 @@ function serialize(f) {
   for (const name of ORDER) {
     const x = f[name];
     out[name] = [x.value, [...x.sentences].sort((a, b) => a - b), x.note, x.status,
-      x.keys ? [...x.keys].sort() : null];
+      x.cantons ? [...x.cantons].sort() : null, x.places ? [...x.places].sort() : null];
   }
   return JSON.stringify(out);
 }
@@ -147,7 +157,7 @@ function valueSpec(name, value) {
 // Does the current value of this field take supporting sentences?
 function takesSentences(name) {
   if (name === "relevant") return false;
-  if (name === "office_locations") return S.f.office_locations.keys.size > 0;
+  if (name === "office_cantons") return S.f.office_cantons.cantons.size > 0;
   const v = S.f[name].value;
   if (v === null) return true; // evidence may be marked before the value is picked
   const vs = valueSpec(name, v);
@@ -155,7 +165,7 @@ function takesSentences(name) {
 }
 function needsSentence(name) {
   if (name === "relevant") return false;
-  if (name === "office_locations") return S.f.office_locations.keys.size > 0;
+  if (name === "office_cantons") return S.f.office_cantons.cantons.size > 0;
   const vs = valueSpec(name, S.f[name].value);
   return vs ? vs.needs_sentence : false;
 }
@@ -163,7 +173,7 @@ function needsSentence(name) {
 // Client-side check of one field; returns an error message or null.
 function checkField(name) {
   const x = S.f[name];
-  if (name !== "office_locations" && x.value === null) return "Pick a value.";
+  if (name !== "office_cantons" && x.value === null) return "Pick a value.";
   if (needsSentence(name) && x.sentences.size === 0) {
     return "Mark at least one supporting sentence (click it on the left).";
   }
@@ -235,7 +245,7 @@ function cueHtml(text, id, candRx) {
 function renderPosting() {
   const it = S.item;
   const pane = $("#posting");
-  const matched = [...new Set((it.location_candidates || []).map((c) => c.matched).filter(Boolean))]
+  const matched = [...new Set(Object.values(it.place_candidates || {}).flat().map((c) => c.matched).filter(Boolean))]
     .sort((a, b) => b.length - a.length)
     .map((m) => m.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
   const candRx = matched.length ? rx(matched.join("|")) : null;
@@ -307,7 +317,7 @@ function onSentenceClick(ev) {
   const x = S.f[name];
   if (name === "relevant") { toast("Relevant takes no evidence. Move to a field with J."); return; }
   if (!takesSentences(name)) {
-    if (name === "office_locations") toast("Add a location first, then mark its sentence.");
+    if (name === "office_cantons") toast("Select a canton first, then mark its sentence.");
     else toast(`${x.value} takes no sentences. Pick another value first.`);
     return;
   }
@@ -319,21 +329,6 @@ function onSentenceClick(ev) {
 
 // ---------------------------------------------------------------- form pane
 
-const CANTONS = {
-  AG: "Aargau", AI: "Appenzell Innerrhoden", AR: "Appenzell Ausserrhoden", BE: "Bern",
-  BL: "Basel-Landschaft", BS: "Basel-Stadt", FR: "Fribourg", GE: "Geneva", GL: "Glarus",
-  GR: "Graubünden", JU: "Jura", LU: "Lucerne", NE: "Neuchâtel", NW: "Nidwalden",
-  OW: "Obwalden", SG: "St. Gallen", SH: "Schaffhausen", SO: "Solothurn", SZ: "Schwyz",
-  TG: "Thurgau", TI: "Ticino", UR: "Uri", VD: "Vaud", VS: "Valais", ZG: "Zug", ZH: "Zürich",
-};
-function locLabel(key) {
-  if (key === "outside_switzerland") return { name: "Outside Switzerland", kind: "" };
-  if (key === "country:CH") return { name: "Switzerland", kind: "country" };
-  const [kind, ...rest] = key.split(":");
-  const name = rest.join(":");
-  if (kind === "canton") return { name: `${name}`, kind: `canton ${CANTONS[name] || ""}`.trim() };
-  return { name, kind };
-}
 const norm = (s) => s.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
 
 function evLinks(x) {
@@ -344,11 +339,7 @@ function evLinks(x) {
 
 function headValue(name) {
   const x = S.f[name];
-  if (name === "office_locations") {
-    if (x.status === "empty" && !x.keys.size) return { text: "not set", cls: "empty" };
-    if (!x.keys.size) return { text: "none named", cls: x.status === "suggested" ? "sugg" : "" };
-    return { text: [...x.keys].map((k) => locLabel(k).name).join(", "), cls: x.status === "suggested" ? "sugg" : "" };
-  }
+  if (name === "office_cantons") return officeHead();
   if (x.value === null) return { text: "not set", cls: "empty" };
   return { text: x.value, cls: x.status === "suggested" ? "sugg" : "" };
 }
@@ -381,67 +372,187 @@ function optionsHtml(name) {
   }).join("")}</div>`;
 }
 
-function locCandidates() {
-  const cands = (S.item.location_candidates || []).map((c) => ({ ...c }));
-  // One quick chip for "outside Switzerland" (key 0) unless it is already a candidate.
-  return cands;
+// ---------------------------------------------------------------- office locations (cantons, then places)
+
+// Language used for a canton's name on its toggle: the name people there use.
+const CANTON_LANG = { FR: "fr", GE: "fr", JU: "fr", NE: "fr", VD: "fr", VS: "fr", TI: "it" };
+// Short forms where the full name does not fit a grid cell (full names are in the tooltip).
+const SHORT_NAME = { AI: "Appenzell I.Rh.", AR: "Appenzell A.Rh.", BL: "Basel-Land" };
+const localName = (c) => SHORT_NAME[c.code] || c[`name_${CANTON_LANG[c.code] || "de"}`] || c.name_en;
+// Grid order: alphabetical by code, so a code you know is found by its first letter.
+const gridCodes = () => S.spec.cantons.map((c) => c.code).sort();
+const OUTSIDE = () => S.spec.outside_value;
+
+function placeCands(code) {
+  const seen = new Set();
+  return ((S.item.place_candidates || {})[code] || []).filter((c) => !seen.has(c.key) && seen.add(c.key));
+}
+// Canton of a place key: from the candidates, else by name in the spec (labels saved earlier).
+function placeCanton(key) {
+  for (const [code, cands] of Object.entries(S.item.place_candidates || {})) {
+    if (cands.some((c) => c.key === key)) return code;
+  }
+  const name = key.split(":").slice(2).join(":");
+  const c = S.spec.cantons.find((x) => x.places.includes(name));
+  return c ? c.code : null;
+}
+function placeName(key) {
+  for (const cands of Object.values(S.item.place_candidates || {})) {
+    const c = cands.find((x) => x.key === key);
+    if (c) return c.name;
+  }
+  return key.split(":").slice(2).join(":");
+}
+// Place rows shown under the grid, in grid order; numbered 1–9 for the keyboard.
+function placeRows() {
+  const o = S.f.office_cantons;
+  const rows = [];
+  for (const code of gridCodes()) {
+    if (!o.cantons.has(code)) continue;
+    const cands = placeCands(code);
+    const extra = [...o.places].filter((k) => !cands.some((c) => c.key === k) && placeCanton(k) === code)
+      .map((k) => ({ key: k, name: placeName(k), commune: "", matched: "", where: "saved label" }));
+    rows.push({ code, places: [...cands, ...extra] });
+  }
+  return rows;
+}
+const numberedPlaces = () => placeRows().flatMap((r) => r.places).slice(0, 9);
+
+// Filter matches for the typed text: canton code, canton name (any language), or a place name
+// (the spec's main places plus this posting's candidates). Best match first.
+function cantonMatches(query) {
+  const q = norm(query.trim());
+  if (!q) return [];
+  const hints = new Set(S.item.canton_hints || []);
+  const out = [];
+  for (const c of S.spec.cantons) {
+    const names = [c.name_en, c.name_de, c.name_fr, c.name_it].map(norm);
+    const cands = placeCands(c.code);
+    const places = [...new Set([...cands.map((p) => p.name), ...cands.map((p) => p.commune), ...c.places].filter(Boolean))];
+    let score = 9, via = null;
+    if (norm(c.code) === q) score = 0;
+    else if (names.some((n) => n.startsWith(q))) score = 1;
+    else {
+      const p = places.find((n) => norm(n).startsWith(q));
+      if (p) { score = 2; via = p; }
+      else if (q.length >= 3 && names.some((n) => n.includes(q))) score = 3;
+      else if (q.length >= 3) {
+        const p2 = places.find((n) => norm(n).includes(q));
+        if (p2) { score = 4; via = p2; }
+      }
+    }
+    if (score < 9) {
+      const cand = via ? cands.find((p) => p.name === via || p.commune === via) : null;
+      out.push({ code: c.code, score, via, placeKey: cand ? cand.key : null, hint: hints.has(c.code) });
+    }
+  }
+  const outside = norm("outside switzerland abroad ausland etranger");
+  if (q.length >= 3 && outside.split(" ").some((w) => w.startsWith(q))) {
+    out.push({ code: OUTSIDE(), score: 1, via: null, placeKey: null, hint: false });
+  }
+  return out.sort((a, b) => a.score - b.score || b.hint - a.hint || a.code.localeCompare(b.code));
 }
 
-function locationsHtml() {
-  const x = S.f.office_locations;
-  const sugg = x.status === "suggested";
-  const cands = locCandidates().slice(0, 9);
-  const candKeys = new Set(cands.map((c) => c.key));
-  const chip = (key, extra, num) => {
-    const on = x.keys.has(key);
-    const { name, kind } = locLabel(key);
-    return `<button class="chip${on ? " on" : ""}${on && sugg ? " sugg" : ""}" data-loc="${esc(key)}">
-      ${num !== undefined ? `<span class="k">${num}</span>` : ""}<span>${on ? "✓ " : ""}${esc(name)}</span>
-      ${kind ? `<span class="kind">${esc(kind)}</span>` : ""}${extra || ""}</button>`;
-  };
-  let html = '<div class="loc-sub">Candidates</div><div class="chips">';
-  html += cands.length
-    ? cands.map((c, i) => chip(c.key, `<span class="where">“${esc(c.matched)}” · ${esc(c.where)}</span>`, i + 1)).join("")
-    : '<span class="f-q" style="margin:0">No candidates found.</span>';
-  if (!candKeys.has("outside_switzerland")) html += chip("outside_switzerland", "", 0);
-  html += "</div>";
-  const others = [...x.keys].filter((k) => !candKeys.has(k) && k !== "outside_switzerland");
-  if (others.length) {
-    html += `<div class="loc-sub">Added</div><div class="chips">${others.map((k) => chip(k, '<span class="where">× remove</span>')).join("")}</div>`;
+function touchOffice() {
+  const o = S.f.office_cantons;
+  o.status = "set";
+  if (!o.cantons.size) o.sentences.clear();
+  delete S.errors.office_cantons;
+}
+
+// Select or clear a canton. Selecting pre-selects the places found in the location field or the
+// title (and the place typed in the filter); clearing it drops its places.
+function toggleCanton(code, placeKey = null) {
+  const o = S.f.office_cantons;
+  if (o.cantons.has(code)) {
+    o.cantons.delete(code);
+    for (const k of [...o.places]) if (placeCanton(k) === code) o.places.delete(k);
+  } else {
+    o.cantons.add(code);
+    for (const c of placeCands(code)) if (c.where !== "posting text") o.places.add(c.key);
+    if (placeKey) o.places.add(placeKey);
   }
-  html += `<div class="loc-search"><input id="loc-q" type="search" placeholder="Add a location: city, canton (ZH), Switzerland…  ( / )" autocomplete="off" value="${esc(S.locQuery)}"><div class="loc-results" id="loc-results"></div></div>`;
+  touchOffice();
+  refresh();
+}
+
+function togglePlace(key) {
+  const o = S.f.office_cantons;
+  if (o.places.has(key)) o.places.delete(key); else o.places.add(key);
+  touchOffice();
+  refresh();
+}
+
+function officeHead() {
+  const o = S.f.office_cantons;
+  const cls = o.status === "suggested" ? "sugg" : "";
+  if (o.status === "empty" && !o.cantons.size) return { text: "not set", cls: "empty" };
+  if (!o.cantons.size) return { text: "not stated", cls };
+  const codes = [...gridCodes(), OUTSIDE()].filter((c) => o.cantons.has(c))
+    .map((c) => (c === OUTSIDE() ? "outside CH" : c));
+  const places = [...o.places].map(placeName);
+  return { text: codes.join(", ") + (places.length ? ` · ${places.join(", ")}` : ""), cls };
+}
+
+function officeHtml() {
+  const o = S.f.office_cantons;
+  const sugg = o.status === "suggested";
+  const hints = new Set(S.item.canton_hints || []);
+  const matches = cantonMatches(S.locQuery);
+  S.locSel = Math.max(0, Math.min(S.locSel, matches.length - 1));
+  const matchSet = new Set(matches.map((m) => m.code));
+  const top = matches[S.locSel];
+  const filtering = S.locQuery.trim() !== "";
+  const cls = (code) => {
+    const on = o.cantons.has(code);
+    return ["ct", on ? "on" : "", on && sugg ? "sugg" : "", hints.has(code) ? "hint" : "",
+      filtering && !matchSet.has(code) ? "dim" : "", top && top.code === code ? "best" : ""].filter(Boolean).join(" ");
+  };
+
+  let html = `<div class="cfilter"><input id="canton-q" type="search" autocomplete="off" spellcheck="false"
+    placeholder="Type a code or a place: vd, lau…   Enter toggles" value="${esc(S.locQuery)}">`;
+  if (filtering) {
+    html += top
+      ? `<div class="cmatch"><kbd>Enter</kbd> ${o.cantons.has(top.code) ? "clears" : "selects"} <b>${esc(top.code === OUTSIDE() ? "Outside Switzerland" : top.code + " " + localName(S.cantonBy[top.code]))}</b>${top.via ? ` · matched “${esc(top.via)}”` : ""}${matches.length > 1 ? ` <span class="muted">· ↑↓ ${matches.length} matches</span>` : ""}</div>`
+      : '<div class="cmatch muted">No canton or place matches.</div>';
+  }
+  html += "</div>";
+
+  html += `<div class="cgrid">${gridCodes().map((code) => {
+    const c = S.cantonBy[code];
+    const title = `${c.name_en} · ${c.name_de} / ${c.name_fr} / ${c.name_it}${hints.has(code) ? " · found in the posting" : ""}`;
+    return `<button class="${cls(code)}" data-canton="${code}" title="${esc(title)}"><span class="cc">${code}</span><span class="cn">${esc(localName(c))}</span></button>`;
+  }).join("")}</div>`;
+
+  html += `<div class="crow"><button class="${cls(OUTSIDE())} out" data-canton="${OUTSIDE()}"><span class="cc">0</span><span class="cn">Outside Switzerland</span></button>`;
+  html += o.cantons.size
+    ? `<span class="cstate">${o.cantons.size} selected</span>`
+    : '<span class="cstate none">None selected → <b>not stated</b></span>';
+  html += "</div>";
+  if (hints.size) html += '<div class="ckey"><span class="hint-dot"></span>found in the posting by code (a hint, not a suggestion)</div>';
+
+  const rows = placeRows();
+  if (rows.length) {
+    let n = 0;
+    html += '<div class="loc-sub">Places</div>';
+    for (const r of rows) {
+      html += `<div class="prow"><span class="pc">${r.code}</span><div class="chips">`;
+      html += r.places.length ? r.places.map((p) => {
+        n++;
+        const on = o.places.has(p.key);
+        const where = p.where === "saved label" ? p.where : `“${p.matched}” · ${p.where}`;
+        return `<button class="chip${on ? " on" : ""}${on && sugg ? " sugg" : ""}" data-place="${esc(p.key)}">
+          ${n <= 9 ? `<span class="k">${n}</span>` : ""}<span>${on ? "✓ " : ""}${esc(p.name)}</span><span class="where">${esc(where)}</span></button>`;
+      }).join("") : '<span class="pnone">no place found in the posting</span>';
+      html += "</div></div>";
+    }
+    html += '<div class="phint">Only places code found in the posting can be picked. Places from the location field or title start selected; check the ones from the posting text.</div>';
+  }
   return html;
 }
 
-function locResults() {
-  const q = norm(S.locQuery.trim());
-  if (!q) return [];
-  const x = S.f.office_locations;
-  return S.spec.location_keys
-    .filter((k) => !x.keys.has(k))
-    .map((k) => {
-      const { name, kind } = locLabel(k);
-      const n = norm(name);
-      const score = n === q ? 0 : n.startsWith(q) ? 1 : n.includes(q) || norm(k).includes(q) || norm(kind).includes(q) ? 2 : 9;
-      return [score, k];
-    })
-    .filter(([s]) => s < 9)
-    .sort((a, b) => a[0] - b[0] || a[1].localeCompare(b[1]))
-    .slice(0, 10)
-    .map(([, k]) => k);
-}
-
-function renderLocResults() {
-  const el = $("#loc-results");
-  if (!el) return;
-  el.innerHTML = locResults().map((k, i) => {
-    const { name, kind } = locLabel(k);
-    return `<button class="chip${i === 0 ? " first" : ""}" data-addloc="${esc(k)}"><span>+ ${esc(name)}</span>${kind ? `<span class="kind">${esc(kind)}</span>` : ""}</button>`;
-  }).join("");
-}
-
 function noteHtml(name) {
-  if (name === "relevant" || name === "office_locations") return "";
+  if (name === "relevant" || name === "office_cantons") return "";
   const x = S.f[name];
   const open = S.noteOpen[name] || x.note;
   if (!open) return `<button class="note-toggle" data-note="${name}">+ note (E)</button>`;
@@ -466,10 +577,10 @@ function renderForm() {
         <span class="f-ev">${evLinks(x)}</span>
         <span class="status ${x.status}">${x.status === "set" ? "✓ set" : x.status}</span></div>`;
     if (isAct) {
-      const q = name === "relevant" ? "" : name === "office_locations" ? "Which offices does this role work from?" : S.specBy[name].question;
+      const q = name === "relevant" ? "" : name === "office_cantons" ? "Which cantons have an office or work location for this role?" : S.specBy[name].question;
       html += q ? `<div class="f-q">${esc(q)}</div>` : "";
       html += `<div class="f-hint">${esc(HINTS[name])}</div>`;
-      html += name === "office_locations" ? locationsHtml() : optionsHtml(name);
+      html += name === "office_cantons" ? officeHtml() : optionsHtml(name);
       if (x.status === "suggested") html += '<div class="f-warn">Suggested. Check the value and the outlined sentences, then press Enter to confirm.</div>';
     }
     if (err) html += `<div class="f-err">${esc(err)}</div>`;
@@ -483,7 +594,6 @@ function renderForm() {
     ? `<div class="note"><textarea id="post-note" rows="2" placeholder="Note for the whole posting (optional)">${esc(S.f._note)}</textarea></div>`
     : '<button class="note-toggle" data-note="_posting">+ note for the posting (Shift+E)</button>'}</div>`;
   body.innerHTML = html;
-  if (act === "office_locations") renderLocResults();
   if (focusId && document.getElementById(focusId)) {
     const el = document.getElementById(focusId);
     el.focus();
@@ -544,6 +654,7 @@ function setActive(i, { scroll = true } = {}) {
   S.ybuf = "";
   S.yhover = null;
   S.locQuery = "";
+  S.locSel = 0;
   refresh();
   if (scroll) {
     const x = S.f[activeName()];
@@ -568,19 +679,10 @@ function pickValue(name, value) {
   else refresh();
 }
 
-function toggleLoc(key) {
-  const x = S.f.office_locations;
-  if (x.keys.has(key)) x.keys.delete(key); else x.keys.add(key);
-  if (!x.keys.size) x.sentences.clear();
-  x.status = "set";
-  delete S.errors.office_locations;
-  refresh();
-}
-
 function confirmActive() {
   const name = activeName();
   const x = S.f[name];
-  if (name === "office_locations" && x.status === "empty") x.status = "set"; // empty set is a valid answer
+  if (name === "office_cantons" && x.status === "empty") x.status = "set"; // empty set = not stated
   const err = checkField(name);
   if (err) { S.errors[name] = err; refresh(); return; }
   x.status = "set";
@@ -610,7 +712,7 @@ function confirmAll() {
 function buildPayload() {
   const fields = {};
   for (const name of ORDER) {
-    if (name === "relevant" || name === "office_locations") continue;
+    if (name === "relevant" || name === "office_cantons") continue;
     const x = S.f[name];
     fields[name] = {
       value: x.value,
@@ -618,12 +720,15 @@ function buildPayload() {
       note: x.note,
     };
   }
-  const loc = S.f.office_locations;
+  const o = S.f.office_cantons;
+  const codes = [...S.spec.cantons.map((c) => c.code), S.spec.outside_value];
   return {
     relevant: S.f.relevant.value,
     fields,
-    office_locations: [...loc.keys].sort(),
-    office_locations_sentences: loc.keys.size ? [...loc.sentences].sort((a, b) => a - b) : [],
+    office_cantons: codes.filter((c) => o.cantons.has(c)),
+    office_cantons_sentences: o.cantons.size ? [...o.sentences].sort((a, b) => a - b) : [],
+    // Always explicit: when omitted the server fills in the places code finds.
+    office_places: [...o.places].filter((k) => { const c = placeCanton(k); return !c || o.cantons.has(c); }).sort(),
     note: S.f._note,
   };
 }
@@ -652,7 +757,7 @@ async function save() {
     S.errors = {};
     const other = [];
     for (const [k, msg] of Object.entries(errs)) {
-      const name = k === "office_locations_sentences" ? "office_locations" : k;
+      const name = k.startsWith("office_") ? "office_cantons" : k;
       if (ORDER.includes(name)) S.errors[name] = msg; else other.push(`${k}: ${msg}`);
     }
     globalMsg(`Not saved (server said no)${other.length ? ": " + other.join("; ") : "; see the marked fields."}`, "err");
@@ -758,6 +863,57 @@ function yearsKey(key) {
   return true;
 }
 
+// Office field: a plain letter starts the canton filter (J/K still move between fields while the
+// filter is empty; press / first to type a word that starts with j or k).
+function officeLetter(ev) {
+  const k = ev.key;
+  if (k.length !== 1 || !/\p{L}/u.test(k) || ev.shiftKey) return false;
+  if ((k === "j" || k === "k") && !S.locQuery) return false;
+  ev.preventDefault();
+  const input = $("#canton-q");
+  if (!input) return false;
+  input.focus();
+  S.locQuery += k;
+  S.locSel = 0;
+  renderForm();
+  return true;
+}
+
+// Keys inside the canton filter box.
+function filterKey(ev) {
+  const input = ev.target;
+  const k = ev.key;
+  if (k === "Enter" && !ev.ctrlKey && !ev.metaKey) {
+    ev.preventDefault();
+    ev.stopPropagation();
+    const matches = cantonMatches(S.locQuery);
+    input.blur();
+    if (!S.locQuery.trim()) { S.locQuery = ""; confirmActive(); return; }
+    const top = matches[S.locSel];
+    S.locQuery = "";
+    S.locSel = 0;
+    if (!top) { refresh(); return; }
+    toggleCanton(top.code, S.f.office_cantons.cantons.has(top.code) ? null : top.placeKey);
+  } else if (k === "Escape") {
+    ev.preventDefault();
+    ev.stopPropagation();
+    S.locQuery = "";
+    input.blur();
+    refresh();
+  } else if (k === "ArrowDown" || k === "ArrowUp") {
+    ev.preventDefault();
+    ev.stopPropagation();
+    if (S.locQuery.trim()) {
+      const n = cantonMatches(S.locQuery).length;
+      if (n) S.locSel = (S.locSel + (k === "ArrowDown" ? 1 : n - 1)) % n;
+      renderForm();
+    } else {
+      input.blur();
+      setActive(S.active + (k === "ArrowDown" ? 1 : -1));
+    }
+  }
+}
+
 function onKey(ev) {
   if (!S.f) return;
   const t = ev.target;
@@ -772,13 +928,14 @@ function onKey(ev) {
   const name = activeName();
   const k = ev.key;
   if (name === "min_years" && yearsKey(k)) { ev.preventDefault(); return; }
+  if (name === "office_cantons" && officeLetter(ev)) return;
   if (/^\d$/.test(k)) {
     ev.preventDefault();
     const n = Number(k);
-    if (name === "office_locations") {
-      if (n === 0) { toggleLoc("outside_switzerland"); return; }
-      const c = locCandidates()[n - 1];
-      if (c) toggleLoc(c.key);
+    if (name === "office_cantons") {
+      if (n === 0) { toggleCanton(OUTSIDE()); return; }
+      const p = numberedPlaces()[n - 1];
+      if (p) togglePlace(p.key);
       return;
     }
     const values = name === "relevant" ? S.spec.relevant_values : S.specBy[name].values.map((v) => v.value);
@@ -801,12 +958,12 @@ function onKey(ev) {
     case "g": case "G": ev.preventDefault(); openJump(); break;
     case "?": ev.preventDefault(); $("#help").showModal(); break;
     case "/":
-      if (name === "office_locations") { ev.preventDefault(); $("#loc-q").focus(); }
+      if (name === "office_cantons") { ev.preventDefault(); $("#canton-q").focus(); }
       break;
     case "e": case "E": {
       ev.preventDefault();
       const key = ev.shiftKey ? "_posting" : name;
-      if (key === "relevant" || key === "office_locations") { toast("Use the posting note (Shift+E) for this field."); break; }
+      if (key === "relevant" || key === "office_cantons") { toast("Use the posting note (Shift+E) for this field."); break; }
       S.noteOpen[key] = true;
       renderForm();
       const el = key === "_posting" ? $("#post-note") : $(`textarea[data-notefor="${key}"]`);
@@ -836,10 +993,10 @@ function wire() {
     if (idx !== S.active) { setActive(idx); return; }
     const opt = ev.target.closest(".opt");
     if (opt) { S.ybuf = ""; pickValue(name, opt.dataset.value); return; }
-    const loc = ev.target.closest("[data-loc]");
-    if (loc) { toggleLoc(loc.dataset.loc); return; }
-    const add = ev.target.closest("[data-addloc]");
-    if (add) { S.locQuery = ""; toggleLoc(add.dataset.addloc); return; }
+    const ct = ev.target.closest("[data-canton]");
+    if (ct) { S.locQuery = ""; toggleCanton(ct.dataset.canton); return; }
+    const pl = ev.target.closest("[data-place]");
+    if (pl) { togglePlace(pl.dataset.place); return; }
     const nt = ev.target.closest("[data-note]");
     if (nt) {
       S.noteOpen[nt.dataset.note] = true;
@@ -852,16 +1009,12 @@ function wire() {
     const t = ev.target;
     if (t.dataset.notefor) S.f[t.dataset.notefor].note = t.value;
     else if (t.id === "post-note") S.f._note = t.value;
-    else if (t.id === "loc-q") { S.locQuery = t.value; renderLocResults(); return; }
+    else if (t.id === "canton-q") { S.locQuery = t.value; S.locSel = 0; renderForm(); return; }
     renderTop();
   });
   form.addEventListener("keydown", (ev) => {
-    if (ev.target.id !== "loc-q") return;
-    if (ev.key === "Enter" && !ev.ctrlKey && !ev.metaKey) {
-      ev.preventDefault();
-      const first = locResults()[0];
-      if (first) { S.locQuery = ""; toggleLoc(first); $("#loc-q").focus(); }
-    }
+    if (ev.target.id !== "canton-q") return;
+    filterKey(ev);
   });
   form.addEventListener("mouseover", (ev) => {
     const f = ev.target.closest(".field");
@@ -917,6 +1070,7 @@ async function init() {
   ]);
   S.spec = spec.data;
   for (const f of S.spec.fields) S.specBy[f.name] = f;
+  for (const c of S.spec.cantons) S.cantonBy[c.code] = c;
   S.items = items.data;
   S.progress = progress.data;
   wire();

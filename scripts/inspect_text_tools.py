@@ -9,7 +9,7 @@ from collections import Counter
 
 from jobfacts.db import connect
 from jobfacts.language import detect
-from jobfacts.locations import find_candidates
+from jobfacts.locations import canton_hints, mentions_switzerland
 from jobfacts.sentences import split
 
 SWISHISH = (
@@ -39,19 +39,17 @@ def main() -> None:
     matched: Counter = Counter()
     for _, loc, _ in rows:
         loc = loc or ""
-        cands = find_candidates(loc, location_field=True)
-        if any(c.kind != "country" or True for c in cands):
-            pass
-        if cands:
+        cands = canton_hints(loc, location_field=True)
+        if cands or mentions_switzerland(loc, location_field=True):
             with_cand += 1
-            matched.update(c.matched.lower() for c in cands)
+            matched.update(cands)
         elif any(w in loc.lower() for w in SWISHISH):
             missing[loc] += 1
     print(
         f"\nLOCATION: {with_cand}/{len(rows)} postings with a candidate in location_raw "
         f"({100 * with_cand / len(rows):.1f}%)"
     )
-    print("most common matched strings:", matched.most_common(15))
+    print("most common cantons:", matched.most_common(15))
     print("Swiss-looking location_raw WITHOUT candidate (top 20):")
     for loc, n in missing.most_common(20):
         print(f"  {n:4d}  {loc!r}")
@@ -59,11 +57,10 @@ def main() -> None:
     # Candidates in title/description only (free-text rule), for false-positive spotting.
     free: Counter = Counter()
     for title, _, d in rows:
-        for c in find_candidates(f"{title}\n{d or ''}"):
-            free[(c.matched, c.key)] += 1
-    print("\nFree-text matches (top 25):", free.most_common(25))
+        free.update(canton_hints(f"{title}\n{d or ''}"))
+    print("\nFree-text canton hints (top 25):", free.most_common(25))
     unlocated = Counter(
-        loc for _, loc, _ in rows if loc and not find_candidates(loc, location_field=True)
+        loc for _, loc, _ in rows if loc and not mentions_switzerland(loc, location_field=True)
     )
     print("Most common location_raw with no candidate (top 25):")
     for loc, n in unlocated.most_common(25):

@@ -51,18 +51,30 @@ class PostingText:
         lines += [f"{label(s.id)}| {s.text}" for s in self.sentences]
         return "\n".join(lines)
 
-    def candidates(self) -> list[tuple[locations.Candidate, str]]:
-        """Swiss place candidates (one per key), with where they were found."""
-        found: dict[str, tuple[locations.Candidate, str]] = {}
-        for c in locations.find_candidates(self.location_raw, location_field=True):
-            found.setdefault(c.key, (c, "location field"))
-        for c in locations.find_candidates(self.description):
-            found.setdefault(c.key, (c, "posting text"))
+    def canton_hints(self) -> list[str]:
+        """Cantons suggested by names in the location field, title and description."""
+        found = locations.canton_hints(self.location_raw, location_field=True)
+        for text in (self.title, self.description):
+            found += [c for c in locations.canton_hints(text) if c not in found]
+        return found
+
+    def places_in(self, cantons) -> list[tuple[locations.PlaceMatch, str]]:
+        """Register places in the given cantons named in the posting: one per place key,
+        with where it was first found ("location field", "title", "posting text")."""
+        found: dict[str, tuple[locations.PlaceMatch, str]] = {}
+        sources = (
+            (self.location_raw, True, "location field"),
+            (self.title, False, "title"),
+            (self.description, False, "posting text"),
+        )
+        for text, in_field, where in sources:
+            for m in locations.find_places(text, cantons, location_field=in_field):
+                found.setdefault(m.key, (m, where))
         return list(found.values())
 
     def is_extraction_eligible(self) -> bool:
         """Decision 7a: a Swiss location in the location field, or remote/anywhere/home office."""
-        swiss = bool(locations.find_candidates(self.location_raw, location_field=True))
+        swiss = locations.mentions_switzerland(self.location_raw, location_field=True)
         return swiss or bool(_REMOTE.search(f"{self.location_raw} {self.title}"))
 
 

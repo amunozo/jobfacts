@@ -165,3 +165,16 @@ Newest at the bottom.
   towards or away from `not_stated`.
 - **Why:** the documented first-option bias is not measurable here, so the
   original order stays.
+
+## 2026-11-02: Office location as canton first, place second
+- **What:** the model picks the canton(s) with an office (26 cantons +
+  outside Switzerland; none = not stated) with evidence; code then finds the
+  places inside those cantons in swisstopo's official locality register
+  (`config/swiss_places.csv`, ~5,900 places, (c) swisstopo, open data that
+  may be redistributed with attribution).
+- **Why:** 26 options always fit one Jev question set; the canton removes
+  most name ambiguity (Baden AG, Rapperswil SG/BE); search filters are
+  regional; the official register finds villages a hand-made list missed
+  (Ibach, Netstal, Grancia). Accuracy is measured at canton level first.
+- **Rejected:** a model choice over communes (Bern and Vaud have ~300 each,
+  over Jev's 255-option limit); the hand-made list of ~255 places.

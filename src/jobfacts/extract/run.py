@@ -59,6 +59,12 @@ def eligible_ids(conn: psycopg.Connection, model: str = jev.MODEL) -> list[int]:
     return [p.id for p in store.load_postings(conn, ids) if p.is_extraction_eligible()]
 
 
+def add_places(p: PostingText, result: Result) -> None:
+    """Code step: place keys in the cantons the model chose (not model-extracted)."""
+    if not result.error:
+        result.office_places = [m.key for m, _ in p.places_in(result.office_cantons)]
+
+
 def run_extraction(
     conn: psycopg.Connection,
     extractor: Extractor,
@@ -77,6 +83,7 @@ def run_extraction(
     results: list[Result] = []
     with ThreadPoolExecutor(CONCURRENCY) as pool:
         for p, result in zip(postings, pool.map(extractor.extract, postings), strict=True):
+            add_places(p, result)
             store.save_extraction(conn, run_id, p.id, result)
             results.append(result)
     store.finish_run(conn, run_id)

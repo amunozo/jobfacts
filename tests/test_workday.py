@@ -345,8 +345,8 @@ def test_fetch_flags_a_capped_sitemap():
 
 
 def test_prefilter_can_be_switched_off():
-    a = u("Netstal", "A_R-1")  # a small place the location list does not know
-    site = Site([(a, None)], {a: page(locality="Netstal")})
+    a = u("Hintertupfingen", "A_R-1")  # a place the register does not know
+    site = Site([(a, None)], {a: page(locality="Hintertupfingen")})
     assert workday.fetch(site.client(), "acme", EXTRA, None, limiter()).postings == []
     read = workday.fetch(site.client(), "acme", {**EXTRA, "prefilter": False}, None, limiter())
     assert [p.source_job_id for p in read.postings] == ["R-1"]

@@ -26,7 +26,7 @@ def main(run_ids: list[int]) -> None:
         names[rid] = extractor
         cols = ", ".join([*FIELD_NAMES, *(f"{f}_sentences" for f in FIELDS)])
         cur = conn.execute(
-            f"SELECT posting_id, {cols}, office_locations, error, cost_usd, latency_ms, "
+            f"SELECT posting_id, {cols}, office_cantons, error, cost_usd, latency_ms, "
             "tokens_in, tokens_out FROM extractions WHERE run_id = %s",
             (rid,),
         )
@@ -57,14 +57,14 @@ def main(run_ids: list[int]) -> None:
         ra, rb = rows[a][i], rows[b][i]
         if ra["error"] or rb["error"]:
             return None
-        if f == "office_locations":
+        if f == "office_cantons":
             return set(ra[f] or []) == set(rb[f] or [])
         return ra[f] == rb[f]
 
     for a, b in itertools.combinations(run_ids, 2):
         print(f"\n== {names[a]} vs {names[b]} (share of postings with identical value)")
         print(f"{'field':26}{'all':>8}" + "".join(f"{k:>8}" for k in langs))
-        for f in [*FIELD_NAMES, "office_locations"]:
+        for f in [*FIELD_NAMES, "office_cantons"]:
             cells = []
             for group in [ids, *langs.values()]:
                 r = [same(a, b, f, i) for i in group]

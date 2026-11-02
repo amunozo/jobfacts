@@ -12,7 +12,7 @@ def reply(**overrides):
         "french": {"value": "not_mentioned", "sentences": []},
         "min_years": {"value": 3, "sentences": ["S003"]},
         "title_level": {"value": "senior", "sentences": ["T"]},
-        "office_locations": {"value": ["city:Zürich"], "sentences": ["L"]},
+        "office_cantons": {"value": ["ZH"], "sentences": ["L"]},
     }
     base.update(overrides)
     return json.dumps(base)
@@ -34,7 +34,7 @@ def test_valid_output():
     assert r.values["min_years"] == "3" and r.values["work_mode"] == "hybrid"
     assert r.sentences["german"] == [4] and r.sentences["title_level"] == [0]
     assert r.sentences["french"] == []
-    assert r.office_locations == ["city:Zürich"]
+    assert r.office_cantons == ["ZH"] and r.sentences["office_cantons"] == [-1]
     assert r.seniority == "mid"
     assert r.tokens_in == 100 and r.tokens_out == 50
     assert abs(r.cost_usd - (100 * 1.0 + 50 * 2.0) / 1e6) < 1e-12
@@ -67,13 +67,23 @@ def test_not_json_is_error():
     assert r.error and r.error.startswith("invalid output")
 
 
-def test_missing_key_and_unknown_candidate():
+def test_missing_key_and_unknown_canton():
     obj = json.loads(reply())
     del obj["french"]
     r, _ = run([json.dumps(obj)] * 2)
     assert r.error and "missing keys" in r.error
-    r, _ = run([reply(office_locations={"value": ["city:Bern"], "sentences": []})] * 2)
-    assert r.error and "not one of the candidates" in r.error
+    r, _ = run([reply(office_cantons={"value": ["XX"], "sentences": []})] * 2)
+    assert r.error and "not a canton code" in r.error
+
+
+def test_outside_switzerland_empty_and_unquoted_cantons():
+    ok = reply(office_cantons={"value": ["ZH", "outside_switzerland"], "sentences": ["S001"]})
+    r, _ = run([ok])
+    assert r.office_cantons == ["ZH", "outside_switzerland"]
+    r, _ = run([reply(office_cantons={"value": [], "sentences": ["S001"]})])
+    assert r.office_cantons == [] and r.sentences["office_cantons"] == []  # not stated: no quote
+    r, _ = run([reply(office_cantons={"value": ["ZH"], "sentences": []})])
+    assert r.error is None and r.details["missing_quote"] == ["office_cantons"]
 
 
 def test_missing_quote_is_flagged_not_hidden():
@@ -98,3 +108,27 @@ def test_prompt_is_generated_from_spec():
     for f in FIELDS.values():
         for v in f.values:
             assert f'"{v}"' in prompt
+    assert "- ZH: Zurich / Zürich / Zurich / Zurigo; Zürich, Winterthur" in prompt
+    assert "office_cantons" in prompt and "{" not in prompt.split("Reply with")[0]
+
+
+def test_places_found_by_code_in_chosen_cantons():
+    from jobfacts.extract.base import Result
+    from jobfacts.extract.run import add_places
+
+    p = posting("Our offices are in Zürich and Winterthur. Remote from Bern is possible.")
+    zh = p.places_in(["ZH"])
+    assert [(m.name, where) for m, where in zh] == [
+        ("Zürich", "location field"),
+        ("Winterthur", "posting text"),
+    ]
+    r = Result(office_cantons=["ZH", "outside_switzerland"])
+    add_places(p, r)
+    assert r.office_places == ["place:261:Zürich", "place:230:Winterthur"]
+    r = Result(office_cantons=[])
+    add_places(p, r)
+    assert r.office_places == []
+    r = Result(error="boom")
+    add_places(p, r)
+    assert r.office_places == []
+    assert p.canton_hints() == ["ZH", "BE"]

@@ -32,13 +32,23 @@ these names and values. Change a field here first, then everywhere else.
 | `remote` | Fully remote (occasional travel or offsites still count as remote). |
 | `not_stated` | The posting does not say. |
 
-### `office_locations`
-A set of values from a fixed list kept in code (`locations` list): the 26
-Swiss cantons, the Swiss cities and towns that host employers (each mapped to
-its canton), plus `outside_switzerland`. The job-board API location field and
-a name match on the posting text give the candidates; the model confirms
-which ones are offices for this role. Empty when no office is named.
-Accuracy is measured as an exact match of the set, and also at canton level.
+### `office_cantons`
+A set of values: any of the 26 Swiss canton codes (`ZH`, `BE`, ... `JU`) and
+`outside_switzerland` (an office outside Switzerland is named). The model decides which
+cantons have an office or work location for this role, from the title, the job board's
+location field and the description; a city, town or village counts for its canton. A
+place mentioned only for other reasons (company history, customers, other roles, travel)
+does not count. **Empty set = not stated.** A non-empty set needs supporting
+sentence(s); an empty one carries none. Accuracy is the exact match of the whole set
+(main location metric), plus precision and recall per canton.
+
+### `office_places`
+Not extracted by a model. Code looks for place names in the posting (location field,
+title, description) and matches them against the official register of Swiss localities
+(swisstopo, `config/swiss_places.csv`), **restricted to the cantons in `office_cantons`**.
+Value: a set of place keys `place:<bfs_nr>:<name>` (`bfs_nr` = official commune number,
+e.g. `place:261:Zürich`). Shown to the owner for confirmation while labelling and used
+for search; secondary metric only (it is as good as the cantons).
 
 ### `remote_from_switzerland`
 | Value | Meaning |

@@ -5,7 +5,7 @@ from psycopg.types.json import Jsonb
 
 from jobfacts.extract.base import Result
 from jobfacts.extract.posting import PostingText
-from jobfacts.extract.spec import FIELDS
+from jobfacts.extract.spec import FIELDS, OFFICE_CANTONS
 
 
 def load_postings(
@@ -72,11 +72,19 @@ def save_extraction(conn: psycopg.Connection, run_id: int, posting_id: int, r: R
         for name in FIELDS:
             columns += [name, f"{name}_sentences"]
             values += [r.values[name], r.sentences.get(name, [])]
-        columns += ["office_locations", "seniority"]
-        values += [r.office_locations, r.seniority]
+        columns += [
+            "office_cantons",
+            "office_cantons_sentences",
+            "office_places",
+            "seniority",
+        ]
+        values += [
+            r.office_cantons,
+            r.sentences.get(OFFICE_CANTONS, []),
+            r.office_places,
+            r.seniority,
+        ]
     details = dict(r.details)
-    if r.sentences.get("office_locations"):
-        details["office_locations_sentences"] = r.sentences["office_locations"]
     columns += ["details", "tokens_in", "tokens_out", "cost_usd", "latency_ms", "error"]
     values += [Jsonb(details), r.tokens_in, r.tokens_out, r.cost_usd, r.latency_ms, r.error]
     names = ", ".join(columns)

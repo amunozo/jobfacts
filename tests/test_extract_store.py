@@ -32,8 +32,9 @@ def test_relevance_and_extraction_roundtrip(conn):
     run_id = store.create_run(conn, "jev", "jev-1.14.0", "abc")
     r = Result(
         values={n: next(iter(f.values)) for n, f in FIELDS.items()},
-        sentences={"work_mode": [3], "german": []},
-        office_locations=["city:Zürich"],
+        sentences={"work_mode": [3], "german": [], "office_cantons": [-1]},
+        office_cantons=["ZH"],
+        office_places=["place:261:Zürich"],
         details={"x": 1},
         tokens_in=10,
         cost_usd=0.5,
@@ -43,10 +44,11 @@ def test_relevance_and_extraction_roundtrip(conn):
     store.save_extraction(conn, run_id, pid, r)  # unique (run, posting): second is ignored
     store.finish_run(conn, run_id)
     row = conn.execute(
-        "SELECT work_mode_sentences, office_locations, seniority, details, error, cost_usd "
+        "SELECT work_mode_sentences, office_cantons, office_cantons_sentences, office_places, "
+        "seniority, details, error, cost_usd "
         "FROM extractions"
     ).fetchall()
-    assert row == [([3], ["city:Zürich"], "mid", {"x": 1}, None, 0.5)]
+    assert row == [([3], ["ZH"], [-1], ["place:261:Zürich"], "mid", {"x": 1}, None, 0.5)]
 
 
 def test_error_row_has_no_values(conn):

@@ -1,8 +1,9 @@
 """Jev (TypeSafe) relevance filter and extractor.
 
 One request per posting: the state is the numbered posting; for each field there is a
-value Choice and a sentence Choice ("which sentence states this?"), plus one Noul per
-location candidate. Probabilities and confidences are kept in `details`.
+value Choice and a sentence Choice ("which sentence states this?"). Office cantons: one
+Noul per canton plus one for "outside Switzerland", and one sentence Choice for the
+evidence. Probabilities and confidences are kept in `details`.
 """
 
 import time
@@ -11,15 +12,19 @@ from typing import Any
 from dotenv import load_dotenv
 from typesafe_sdk import Choice, Noul, TypeSafeClient
 
+from jobfacts import locations
 from jobfacts.extract.base import Result
 from jobfacts.extract.posting import PostingText, label, parse_label
 from jobfacts.extract.spec import (
     FIELDS,
     GENERAL_RULES,
     LOCATION_ID,
-    LOCATION_QUESTION,
+    OFFICE_CANTONS,
+    OFFICE_EVIDENCE_QUESTION,
+    OUTSIDE_QUESTION,
     RELEVANCE_QUESTION,
     TITLE_ID,
+    canton_question,
     order_values,
     spec_hash,
 )
@@ -28,7 +33,7 @@ MODEL = "jev-1.14.0"
 PRICE_PER_MTOK_IN = 0.042
 MAX_OPTIONS = 255
 NONE = "none"
-LOCATION_THRESHOLD = 0.5
+CANTON_THRESHOLD = 0.5
 RELEVANCE_THRESHOLD = 0.5
 RELEVANCE_SENTENCES = 5
 
@@ -51,7 +56,7 @@ def build_state(p: PostingText) -> str:
 
 
 def build_questions(p: PostingText, ordering: str = "original") -> dict[str, Any]:
-    """All questions for one posting (names: v_<field>, s_<field>_<k>, loc_<i>)."""
+    """All questions for one posting (names: v_<field>, s_<field>_<k>, c_<code>, c_outside)."""
     questions: dict[str, Any] = {}
     ids = [TITLE_ID, LOCATION_ID, *(s.id for s in p.sentences)]
     for f in FIELDS.values():
@@ -67,9 +72,13 @@ def build_questions(p: PostingText, ordering: str = "original") -> dict[str, Any
                 ),
                 criteria={**{label(i): None for i in part}, NONE: None},
             )
-    for i, (cand, where) in enumerate(p.candidates()):
-        questions[f"loc_{i}"] = Noul(
-            instructions=LOCATION_QUESTION.format(matched=cand.matched, where=where)
+    for code in locations.CANTONS:
+        questions[f"c_{code}"] = Noul(instructions=canton_question(code))
+    questions["c_outside"] = Noul(instructions=OUTSIDE_QUESTION)
+    for k, part in enumerate(chunks(ids)):
+        questions[f"s_{OFFICE_CANTONS}_{k}"] = Choice(
+            instructions=f"{OFFICE_EVIDENCE_QUESTION} Choices are line ids.",
+            criteria={**{label(i): None for i in part}, NONE: None},
         )
     return questions
 
@@ -139,13 +148,19 @@ class JevExtractor:
                 "confidence": a.confidence,
                 "sentence": sdetail,
             }
-        locs = {}
-        for i, (cand, where) in enumerate(p.candidates()):
-            prob = answers[f"loc_{i}"].noul
-            locs[cand.key] = {"matched": cand.matched, "where": where, "probability": prob}
-            if prob >= LOCATION_THRESHOLD:
-                result.office_locations.append(cand.key)
-        details["office_locations"] = locs
+        probs = {code: answers[f"c_{code}"].noul for code in locations.CANTONS}
+        probs[locations.OUTSIDE] = answers["c_outside"].noul
+        result.office_cantons = [c for c, pr in probs.items() if pr >= CANTON_THRESHOLD]
+        if result.office_cantons:
+            result.sentences[OFFICE_CANTONS], sdetail = best_sentence(
+                answers, OFFICE_CANTONS, n_chunks
+            )
+        else:
+            sdetail = {}
+        details[OFFICE_CANTONS] = {
+            "probabilities": {c: round(pr, 4) for c, pr in probs.items() if pr >= 0.05},
+            "sentence": sdetail,
+        }
         result.details = details
         return result
 

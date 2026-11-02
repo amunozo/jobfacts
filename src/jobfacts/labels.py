@@ -5,12 +5,18 @@ One line per save; the latest line per posting wins. A record:
     {"posting_id": 1, "labeller": "owner", "mode": "blind"|"prefilled", "saved_at": "...",
      "relevant": "true"|"false"|"unsure",
      "fields": {"work_mode": {"value": "hybrid", "sentences": [4], "note": ""}, ...},
-     "office_locations": ["city:Zürich"], "office_locations_sentences": [0], "note": ""}
+     "office_cantons": ["ZH"], "office_cantons_sentences": [-1],
+     "office_places": ["place:261:Zürich"], "note": ""}
+
+`office_cantons` are canton codes plus "outside_switzerland" (empty = not stated); `office_places`
+are place keys inside those cantons (see `jobfacts.locations`); when the payload omits them, the
+server fills in the places code finds in the posting for the labelled cantons.
 
 Sentence ids follow the extraction convention: 0 = title, -1 = location field, 1..n = sentences.
 """
 
 import json
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -51,10 +57,15 @@ def _sentence_ids(value, known: set[int]) -> str | None:
     return None
 
 
-def validate(payload: dict, sentence_ids: set[int]) -> dict:
+def validate(
+    payload: dict,
+    sentence_ids: set[int],
+    default_places: Callable[[list[str]], list[str]] | None = None,
+) -> dict:
     """Check a label payload; return the cleaned record parts or raise ValidationError.
 
     `sentence_ids` are the ids that exist in the posting snapshot (including 0 and -1).
+    `default_places(cantons)` gives the places to store when the payload has no `office_places`.
     """
     errors: dict[str, str] = {}
     fields_in = payload.get("fields") or {}
@@ -90,35 +101,65 @@ def validate(payload: dict, sentence_ids: set[int]) -> dict:
     if relevant not in RELEVANT_VALUES:
         errors["relevant"] = "must be true, false or unsure"
 
-    locs = payload.get("office_locations")
-    allowed = locations.all_keys()
-    if not isinstance(locs, list) or not all(isinstance(k, str) for k in locs):
-        errors["office_locations"] = "must be a list of location keys"
-    elif bad_keys := sorted(set(locs) - allowed):
-        errors["office_locations"] = f"unknown location keys {bad_keys}"
-    loc_sentences = payload.get("office_locations_sentences", [])
+    cantons = payload.get("office_cantons")
+    allowed = locations.office_canton_values()
+    if not isinstance(cantons, list) or not all(isinstance(k, str) for k in cantons):
+        errors["office_cantons"] = "must be a list of canton codes and/or outside_switzerland"
+        cantons = []
+    elif bad_keys := sorted(set(cantons) - set(allowed)):
+        errors["office_cantons"] = f"unknown canton codes {bad_keys}"
+        cantons = []
+    loc_sentences = payload.get("office_cantons_sentences", [])
     bad = _sentence_ids(loc_sentences, sentence_ids)
     if bad:
-        errors["office_locations_sentences"] = bad
+        errors["office_cantons_sentences"] = bad
+    elif "office_cantons" not in errors and cantons and not loc_sentences:
+        errors["office_cantons_sentences"] = "office cantons need at least one supporting sentence"
+    elif "office_cantons" not in errors and not cantons and loc_sentences:
+        errors["office_cantons_sentences"] = "no office cantons (not stated) carries no sentence"
+    places = payload.get("office_places")
+    if places is None:
+        places = default_places(cantons) if default_places else []
+    if not isinstance(places, list) or not all(isinstance(k, str) for k in places):
+        errors["office_places"] = "must be a list of place keys"
+        places = []
+    else:
+        known = locations.all_place_keys()
+        wrong = [k for k in places if k not in known]
+        outside = [
+            k for k in places if k in known and locations.place_by_key(k).canton not in cantons
+        ]
+        if wrong:
+            errors["office_places"] = f"unknown place keys {sorted(wrong)}"
+        elif outside:
+            errors["office_places"] = f"places outside the chosen cantons {sorted(outside)}"
     if errors:
         raise ValidationError(errors)
     return {
         "relevant": relevant,
         "fields": clean_fields,
-        "office_locations": sorted(set(locs)),
-        "office_locations_sentences": sorted(set(loc_sentences)),
+        "office_cantons": [c for c in allowed if c in set(cantons)],
+        "office_cantons_sentences": sorted(set(loc_sentences)),
+        "office_places": sorted(set(places)),
         "note": str(payload.get("note", "") or ""),
     }
 
 
-def save(path: Path, posting_id: int, payload: dict, sentence_ids: set[int], mode: str) -> dict:
+def save(
+    path: Path,
+    posting_id: int,
+    payload: dict,
+    sentence_ids: set[int],
+    mode: str,
+    default_places: Callable[[list[str]], list[str]] | None = None,
+) -> dict:
     """Validate and append one label line. Raises ValidationError; nothing is written then."""
     record = {
         "posting_id": posting_id,
         "labeller": "owner",
         "mode": mode,
         "saved_at": datetime.now(UTC).isoformat(timespec="seconds"),
-        **validate(payload, sentence_ids),
+        **validate(payload, sentence_ids, default_places),
     }
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as f:
