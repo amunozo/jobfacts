@@ -127,7 +127,8 @@ The evaluation is the core of the project, not an extra.
 
 **Milestone 2: a usable service.**
 - Search by meaning (pgvector) next to keyword search.
-- FastAPI service and a simple web page.
+- FastAPI service and a simple web page. The API is designed to be called
+  by other programs too, first the owner's private job-search tools.
 - GitHub Actions with the accuracy gate; Docker; deployment on one cloud
   provider; monitoring.
 - Load test with a stated result (response time at a given request rate).
@@ -156,6 +157,8 @@ The evaluation is the core of the project, not an extra.
 Milestones 3 and 4 start only after Milestones 1 and 2 are finished.
 
 **Later (not planned yet):**
+- An MCP server (the standard way for LLM agents to call tools) wrapping the
+  search API, so assistants such as Claude can search postings directly.
 - Language requirements for English and Italian (Milestone 1 extracts
   German and French only).
 - Private mode: fit against a CV, and links to the private job-search

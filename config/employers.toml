@@ -1,0 +1,478 @@
+# Employers whose public job boards the collector reads.
+# Fields: name, ats, board_id; optional: eu = true (Lever EU host).
+
+[[employer]]
+name = "DeepJudge"
+ats = "ashby"
+board_id = "deepjudge"
+
+[[employer]]
+name = "Proton"
+ats = "greenhouse"
+board_id = "proton"
+
+[[employer]]
+name = "Nexthink"
+ats = "smartrecruiters"
+board_id = "nexthink"
+
+[[employer]]
+name = "Swissquote"
+ats = "smartrecruiters"
+board_id = "swissquote"
+
+[[employer]]
+name = "Scandit"
+ats = "greenhouse"
+board_id = "scandit"
+
+[[employer]]
+name = "GetYourGuide"
+ats = "greenhouse"
+board_id = "getyourguide"
+
+[[employer]]
+name = "Ledgy"
+ats = "greenhouse"
+board_id = "ledgy"
+
+[[employer]]
+name = "Constructor"
+ats = "ashby"
+board_id = "constructor"
+
+[[employer]]
+name = "Neural Concept"
+ats = "ashby"
+board_id = "neuralconcept"
+
+[[employer]]
+name = "Omnilex"
+ats = "ashby"
+board_id = "omnilex"
+
+[[employer]]
+name = "PlantingSpace"
+ats = "ashby"
+board_id = "plantingspace"
+
+[[employer]]
+name = "Smallpdf"
+ats = "ashby"
+board_id = "smallpdf"
+
+[[employer]]
+name = "Tether"
+ats = "recruitee"
+board_id = "tether"
+
+[[employer]]
+name = "ELCA"
+ats = "recruitee"
+board_id = "elca"
+
+[[employer]]
+name = "Climeworks"
+ats = "recruitee"
+board_id = "climeworks"
+
+[[employer]]
+name = "Sportradar"
+ats = "smartrecruiters"
+board_id = "sportradar"
+
+[[employer]]
+name = "Visium"
+ats = "workable"
+board_id = "visium"
+
+[[employer]]
+name = "Unit8"
+ats = "workable"
+board_id = "unit8"
+
+[[employer]]
+name = "LatticeFlow"
+ats = "workable"
+board_id = "latticeflow"
+
+[[employer]]
+name = "Flyability"
+ats = "workable"
+board_id = "flyability"
+
+[[employer]]
+name = "Jua"
+ats = "ashby"
+board_id = "jua"
+
+[[employer]]
+name = "Cradle"
+ats = "ashby"
+board_id = "cradlebio"
+
+[[employer]]
+name = "ElevenLabs"
+ats = "ashby"
+board_id = "elevenlabs"
+
+[[employer]]
+name = "Cohere"
+ats = "ashby"
+board_id = "cohere"
+
+[[employer]]
+name = "Hugging Face"
+ats = "workable"
+board_id = "huggingface"
+
+[[employer]]
+name = "DeepL"
+ats = "ashby"
+board_id = "deepl"
+
+[[employer]]
+name = "Aleph Alpha"
+ats = "ashby"
+board_id = "alephalpha"
+
+[[employer]]
+name = "H Company"
+ats = "ashby"
+board_id = "hcompany"
+
+[[employer]]
+name = "Prime Intellect"
+ats = "ashby"
+board_id = "primeintellect"
+
+[[employer]]
+name = "Featherless AI"
+ats = "ashby"
+board_id = "featherlessai"
+
+[[employer]]
+name = "Poolside"
+ats = "ashby"
+board_id = "poolside"
+
+[[employer]]
+name = "Together AI"
+ats = "greenhouse"
+board_id = "togetherai"
+
+[[employer]]
+name = "Nebius"
+ats = "greenhouse"
+board_id = "nebius"
+
+[[employer]]
+name = "Weaviate"
+ats = "ashby"
+board_id = "weaviate"
+
+[[employer]]
+name = "Pinecone"
+ats = "ashby"
+board_id = "pinecone"
+
+[[employer]]
+name = "Zilliz"
+ats = "lever"
+board_id = "zilliz"
+
+[[employer]]
+name = "Nomic"
+ats = "ashby"
+board_id = "nomic"
+
+[[employer]]
+name = "LangChain"
+ats = "ashby"
+board_id = "langchain"
+
+[[employer]]
+name = "LlamaIndex"
+ats = "ashby"
+board_id = "llamaindex"
+
+[[employer]]
+name = "Unstructured"
+ats = "ashby"
+board_id = "unstructured"
+
+[[employer]]
+name = "Liquid AI"
+ats = "ashby"
+board_id = "liquid-ai"
+
+[[employer]]
+name = "Reka"
+ats = "ashby"
+board_id = "reka"
+
+[[employer]]
+name = "Photoroom"
+ats = "ashby"
+board_id = "photoroom"
+
+[[employer]]
+name = "Dust"
+ats = "ashby"
+board_id = "dust"
+
+[[employer]]
+name = "Nabla"
+ats = "ashby"
+board_id = "nabla"
+
+[[employer]]
+name = "Gladia"
+ats = "ashby"
+board_id = "gladia"
+
+[[employer]]
+name = "Normal Computing"
+ats = "ashby"
+board_id = "normalcomputing"
+
+[[employer]]
+name = "Odyssey"
+ats = "ashby"
+board_id = "odyssey"
+
+[[employer]]
+name = "First Principles"
+ats = "ashby"
+board_id = "firstprinciples"
+
+[[employer]]
+name = "Cantina"
+ats = "ashby"
+board_id = "cantina"
+
+[[employer]]
+name = "Tavus"
+ats = "ashby"
+board_id = "tavus"
+
+[[employer]]
+name = "Miro"
+ats = "ashby"
+board_id = "miro"
+
+[[employer]]
+name = "AssemblyAI"
+ats = "greenhouse"
+board_id = "assemblyai"
+
+[[employer]]
+name = "Isomorphic Labs"
+ats = "greenhouse"
+board_id = "isomorphiclabs"
+
+[[employer]]
+name = "JetBrains"
+ats = "greenhouse"
+board_id = "jetbrains"
+
+[[employer]]
+name = "Prolific"
+ats = "greenhouse"
+board_id = "prolific"
+
+[[employer]]
+name = "Toloka"
+ats = "greenhouse"
+board_id = "toloka"
+
+[[employer]]
+name = "Terra Quantum"
+ats = "greenhouse"
+board_id = "terraquantum"
+
+[[employer]]
+name = "Wikimedia Foundation"
+ats = "greenhouse"
+board_id = "wikimedia"
+
+[[employer]]
+name = "Genius Sports"
+ats = "greenhouse"
+board_id = "geniussports"
+
+[[employer]]
+name = "Artefact"
+ats = "greenhouse"
+board_id = "artefact"
+
+[[employer]]
+name = "SonarSource"
+ats = "lever"
+board_id = "sonarsource"
+
+[[employer]]
+name = "Algorized"
+ats = "lever"
+board_id = "algorized"
+
+[[employer]]
+name = "mimic"
+ats = "lever"
+board_id = "mimic"
+
+[[employer]]
+name = "FutureSearch"
+ats = "workable"
+board_id = "futuresearch"
+
+[[employer]]
+name = "Lightning AI"
+ats = "greenhouse"
+board_id = "lightningai"
+
+[[employer]]
+name = "Typeform"
+ats = "greenhouse"
+board_id = "typeform"
+
+[[employer]]
+name = "Synthesia"
+ats = "ashby"
+board_id = "synthesia"
+
+[[employer]]
+name = "Enact Intelligence"
+ats = "ashby"
+board_id = "enactintelligence"
+
+[[employer]]
+name = "Adaption Labs"
+ats = "ashby"
+board_id = "adaption"
+
+[[employer]]
+name = "Adaptyv Bio"
+ats = "ashby"
+board_id = "adaptyv"
+
+[[employer]]
+name = "BLP Digital"
+ats = "ashby"
+board_id = "blp-digital"
+
+[[employer]]
+name = "Black Forest Labs"
+ats = "ashby"
+board_id = "black-forest-labs"
+
+[[employer]]
+name = "Callosum"
+ats = "ashby"
+board_id = "callosum"
+
+[[employer]]
+name = "Fastino"
+ats = "ashby"
+board_id = "fastino-ai"
+
+[[employer]]
+name = "General Intuition"
+ats = "ashby"
+board_id = "generalintuition-medal"
+
+[[employer]]
+name = "Grubel"
+ats = "ashby"
+board_id = "grubel"
+
+[[employer]]
+name = "Inworld"
+ats = "ashby"
+board_id = "inworld-ai"
+
+[[employer]]
+name = "Mistral"
+ats = "ashby"
+board_id = "mistral.ai"
+
+[[employer]]
+name = "Arize"
+ats = "greenhouse"
+board_id = "arizeai"
+
+[[employer]]
+name = "EWOR"
+ats = "greenhouse"
+board_id = "ewor"
+
+[[employer]]
+name = "EggAI"
+ats = "greenhouse"
+board_id = "eggai"
+
+[[employer]]
+name = "Epoch AI"
+ats = "lever"
+board_id = "epoch-ai"
+
+[[employer]]
+name = "Frontiers"
+ats = "workable"
+board_id = "frontiersmedia"
+
+[[employer]]
+name = "10xTable"
+ats = "workable"
+board_id = "10xtable"
+
+[[employer]]
+name = "Wave"
+ats = "greenhouse"
+board_id = "wavemm1"
+
+[[employer]]
+name = "White Circle"
+ats = "ashby"
+board_id = "whitecircle"
+
+[[employer]]
+name = "XBOW"
+ats = "ashby"
+board_id = "xbowcareers"
+
+[[employer]]
+name = "bexio"
+ats = "recruitee"
+board_id = "bexioag"
+
+[[employer]]
+name = "RepRisk"
+ats = "smartrecruiters"
+board_id = "RepRiskAG"
+
+[[employer]]
+name = "NielsenIQ"
+ats = "smartrecruiters"
+board_id = "NielsenIQ"
+
+[[employer]]
+name = "TomTom"
+ats = "lever"
+board_id = "tomtom"
+eu = true
+
+[[employer]]
+name = "Omilia"
+ats = "workable"
+board_id = "omilia-natural-language-solutions-ua-ltd"
+
+[[employer]]
+name = "Runware"
+ats = "workable"
+board_id = "runware"
+
+[[employer]]
+name = "Squarepoint Capital"
+ats = "greenhouse"
+board_id = "squarepointcapital"

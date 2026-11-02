@@ -88,3 +88,27 @@ Newest at the bottom.
   own docs; only measurement on our labels shows whether it is good enough.
   Running all models costs cents.
 - **Rejected:** choosing one model up front.
+
+## 2026-11-02: Compare embedding models on search results (Milestone 2)
+- **What:** compare at least one API model (Mistral, OpenAI) and one open
+  model (e.g. BGE-M3, Qwen3-Embedding) on the labelled real searches; pick
+  the best. On a tie, prefer Mistral (European provider, key available).
+- **Why:** search quality is measured like extraction quality, not assumed.
+
+## 2026-11-02: Database access with psycopg and plain SQL migrations
+- **What:** psycopg 3 with hand-written SQL; schema changes are numbered SQL
+  files in `migrations/`, applied in order by a small runner that records
+  which ones ran.
+- **Why:** the project is meant to show SQL skills; every query is visible
+  and explainable. Small enough that an ORM adds little.
+- **Rejected:** SQLAlchemy + Alembic (more machinery to learn and explain
+  for a handful of tables; can be adopted later if the schema grows).
+
+## 2026-11-02: A posting is closed only after a successful board read
+- **What:** a posting missing from a board's response is marked closed only
+  if that board was read without error in the same run.
+- **Why:** a failed or empty request must not close every posting of an
+  employer.
+- **Also:** an empty response from a board with open postings counts as a
+  failed read. Trade-off: if an employer truly closes every role, those
+  postings stay open until it posts again.
