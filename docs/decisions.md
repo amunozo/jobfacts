@@ -59,3 +59,32 @@ Newest at the bottom.
   concrete requirement. Staff level is about scope, which years do not show.
 - **Rejected:** title only (the problem swissaijob.ch has); a separate
   `manager` value (not needed for the owner's search yet).
+
+## 2026-11-02: Quotes as chosen sentences
+- **What:** code numbers the posting's sentences; the model answers with
+  sentence numbers; code copies the text.
+- **Why:** quotes are verbatim by construction, and it works for models that
+  cannot generate text (Jev).
+- **Rejected:** model-written quotes as the main design (they can be
+  invented; still accepted from LLMs, with a verbatim check).
+
+## 2026-11-02: Fixed location list and salary brackets
+- **What:** office locations come from a fixed list of cantons and cities;
+  salaries (Milestone 3) will be chosen from brackets, not free numbers.
+- **Why:** turns open extraction into choices, which can be scored exactly
+  and suits classifier models such as Jev, which are weak with numbers.
+
+## 2026-11-02: Seniority read as years plus title level
+- **What:** the model picks `min_years` and `title_level`; code applies
+  "years win" and the staff/principal exception.
+- **Why:** the rule lives in tested code, not in the prompt; models are
+  weaker at arithmetic and thresholds than at reading.
+
+## 2026-11-02: Compare Jev, DeepSeek and other cheap models in Milestone 1
+- **What:** run the same 100 labelled postings through Jev (TypeSafe), a
+  DeepSeek model and at least one other cheap LLM; compare accuracy per
+  field and language, cost and speed.
+- **Why:** Jev is far cheaper and faster but weaker outside English by its
+  own docs; only measurement on our labels shows whether it is good enough.
+  Running all models costs cents.
+- **Rejected:** choosing one model up front.

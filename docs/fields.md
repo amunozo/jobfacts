@@ -9,9 +9,12 @@ these names and values. Change a field here first, then everywhere else.
 - **One value from the allowed list.** Nothing else is accepted; output that
   does not match the schema is retried or flagged, never stored.
 - **Supporting quote.** Every value except `not_stated` / `not_mentioned`
-  comes with one or more quotes copied exactly from the posting. Code checks
-  that each quote appears in the posting text; a quote that does not appear
-  marks the answer as invalid.
+  comes with the posting sentence(s) that support it. Code splits the posting
+  into numbered sentences; the model returns sentence numbers, and code
+  copies the text. Quotes are therefore always verbatim; whether the chosen
+  sentence really supports the value is checked during labelling. (Generative
+  LLMs that return quote text instead are checked by code: the quote must
+  appear in the posting.)
 - **No guessing.** When the posting does not state a fact, the value is
   `not_stated` (or `not_mentioned` for languages), with no quote. Defaults
   such as "no level means mid" are not allowed.
@@ -30,10 +33,12 @@ these names and values. Change a field here first, then everywhere else.
 | `not_stated` | The posting does not say. |
 
 ### `office_locations`
-A list of `{city, country}` as written in the posting (for example
-`{"city": "Zürich", "country": "Switzerland"}`). Empty list when no office is
-named. Code, not the LLM, maps cities to Swiss regions for the search filter.
-Accuracy is measured as an exact match of the set of locations.
+A set of values from a fixed list kept in code (`locations` list): the 26
+Swiss cantons, the Swiss cities and towns that host employers (each mapped to
+its canton), plus `outside_switzerland`. The job-board API location field and
+a name match on the posting text give the candidates; the model confirms
+which ones are offices for this role. Empty when no office is named.
+Accuracy is measured as an exact match of the set, and also at canton level.
 
 ### `remote_from_switzerland`
 | Value | Meaning |
@@ -72,6 +77,12 @@ available as a separate filter.
 | `senior` | 5+ years required, or a senior title. |
 | `staff_principal` | Staff, principal, lead or head-of title. Never from years alone. |
 | `not_stated` | No years, no level in the title. |
+
+Extracted as two parts, combined by code:
+- `min_years`: `0` to `15`, `15_plus`, or `not_stated` (minimum years of
+  experience required).
+- `title_level`: `internship`, `junior`, `mid`, `senior`, `staff_principal`,
+  `not_stated` (from the title only).
 
 Order of evidence:
 
