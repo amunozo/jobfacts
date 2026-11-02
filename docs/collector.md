@@ -1,7 +1,8 @@
 # Collector: run it
 
 The collector reads each employer's public job board (Greenhouse, Lever,
-Ashby, SmartRecruiters, Recruitee, Workable) and stores the postings in
+Ashby, SmartRecruiters, Recruitee, Workable, plus the Personio XML feed and the
+Teamtailor jobs RSS feed) and stores the postings in
 PostgreSQL. Employers are listed in `config/employers.toml`.
 
 ## Run it

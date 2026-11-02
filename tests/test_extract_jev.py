@@ -1,0 +1,94 @@
+from fakes import FakeJev, posting
+from jobfacts.extract import jev
+from jobfacts.extract.spec import FIELDS
+
+
+def test_questions_for_normal_posting():
+    p = posting()
+    q = jev.build_questions(p)
+    for name in FIELDS:
+        assert f"v_{name}" in q and f"s_{name}_0" in q and f"s_{name}_1" not in q
+    # sentence options: ids + none, labels not texts
+    opts = list(q["s_work_mode_0"].criteria)
+    assert opts[0] == "T" and opts[1] == "L" and opts[2] == "S001" and opts[-1] == "none"
+    assert len(opts) == len(p.sentences) + 3
+    # value options come from the spec, in order
+    assert list(q["v_german"].criteria) == list(FIELDS["german"].values)
+    assert any(k.startswith("loc_") for k in q)  # Zürich is a candidate
+
+
+def test_chunking_over_254_sentences():
+    description = " ".join(f"Sentence number {i} is here." for i in range(300))
+    p = posting(description)
+    assert len(p.sentences) == 300
+    q = jev.build_questions(p)
+    parts = [k for k in q if k.startswith("s_work_mode_")]
+    assert len(parts) == 2  # 302 ids -> 254 + 48
+    for k in parts:
+        assert len(q[k].criteria) <= jev.MAX_OPTIONS
+    assert len(q["s_work_mode_0"].criteria) == 255
+
+
+def test_chunks_function():
+    assert jev.chunks([]) == [[]]
+    assert [len(c) for c in jev.chunks(list(range(508)))] == [254, 254]
+
+
+def test_extract_reads_values_sentences_and_locations():
+    p = posting()
+    s_hybrid = p.sentences[-1].id
+    pick = {
+        "v_work_mode": "hybrid",
+        "s_work_mode_0": f"S{s_hybrid:03d}",
+        "v_german": "required_fluent",
+        "s_german_0": "S004",
+        "v_min_years": "3",
+        "s_min_years_0": "S003",
+        "v_french": "not_mentioned",
+        "s_french_0": "S002",  # must be dropped: not_mentioned carries no quote
+    }
+    r = jev.JevExtractor(FakeJev(pick)).extract(p)
+    assert r.error is None
+    assert r.values["work_mode"] == "hybrid" and r.sentences["work_mode"] == [s_hybrid]
+    assert r.sentences["french"] == []
+    assert r.sentences["german"] == [4]
+    assert r.seniority == "mid"
+    assert r.office_locations and r.office_locations[0].startswith("city:")
+    assert r.details["work_mode"]["probabilities"]["hybrid"] == 0.8
+    assert r.tokens_in == 1000 and abs(r.cost_usd - 1000 * 0.042 / 1e6) < 1e-12
+
+
+def test_low_location_probability_is_not_confirmed():
+    r = jev.JevExtractor(FakeJev(noul=0.2)).extract(posting())
+    assert r.office_locations == []
+    assert r.details["office_locations"]
+
+
+def test_best_sentence_across_chunks_and_none():
+    from types import SimpleNamespace as NS
+
+    answers = {
+        "s_x_0": NS(probabilities={"S001": 0.4, "none": 0.6}),
+        "s_x_1": NS(probabilities={"S300": 0.9, "none": 0.1}),
+    }
+    ids, _ = jev.best_sentence(answers, "x", 2)
+    assert ids == [300]
+    answers["s_x_1"] = NS(probabilities={"S300": 0.3, "none": 0.7})
+    answers["s_x_0"] = NS(probabilities={"S001": 0.2, "none": 0.8})
+    assert jev.best_sentence(answers, "x", 2)[0] == []
+
+
+def test_api_failure_is_an_error_result():
+    class Boom:
+        def system_one(self, **kw):
+            raise RuntimeError("down")
+
+    r = jev.JevExtractor(Boom()).extract(posting())
+    assert r.error and "down" in r.error and r.seniority is None
+
+
+def test_relevance_probability_uses_title_and_head():
+    client = FakeJev(noul=0.77)
+    assert jev.relevance_probability(client, posting()) == 0.77
+    state = client.calls[0][0]
+    assert "Senior ML Engineer" in state and "We build machine learning" in state

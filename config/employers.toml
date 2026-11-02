@@ -1,5 +1,5 @@
 # Employers whose public job boards the collector reads.
-# Fields: name, ats, board_id; optional: eu = true (Lever EU host).
+# Fields: name, ats, board_id; optional: eu = true (Lever EU host), url = full feed address (Teamtailor custom domain).
 
 [[employer]]
 name = "DeepJudge"
@@ -476,3 +476,160 @@ board_id = "runware"
 name = "Squarepoint Capital"
 ats = "greenhouse"
 board_id = "squarepointcapital"
+
+[[employer]]
+name = "Personio"
+ats = "personio"
+board_id = "personio"
+
+[[employer]]
+name = "Athebio"
+ats = "personio"
+board_id = "athebio"
+
+[[employer]]
+name = "Corealis Consulting"
+ats = "personio"
+board_id = "corealis"
+
+[[employer]]
+name = "SAEKI"
+ats = "personio"
+board_id = "saeki"
+
+[[employer]]
+name = "Itris"
+ats = "personio"
+board_id = "Itris"
+
+[[employer]]
+name = "auticon Swiss"
+ats = "personio"
+board_id = "auticon-swiss-ag"
+
+[[employer]]
+name = "Kaiko"
+ats = "teamtailor"
+board_id = "kaiko"
+url = "https://jobs.kaiko.ai/jobs.rss"
+
+[[employer]]
+name = "Pruna AI"
+ats = "teamtailor"
+board_id = "pruna"
+url = "https://careers.pruna.ai/jobs.rss"
+
+[[employer]]
+name = "CKW"
+ats = "teamtailor"
+board_id = "ckw"
+
+[[employer]]
+name = "Swiss AviationSoftware"
+ats = "teamtailor"
+board_id = "swissas"
+
+[[employer]]
+name = "LIGENTEC"
+ats = "teamtailor"
+board_id = "ligentec"
+
+[[employer]]
+name = "Azqore"
+ats = "teamtailor"
+board_id = "azqoresa"
+
+[[employer]]
+name = "Darest Consulting Services"
+ats = "teamtailor"
+board_id = "darestinformaticsa"
+
+[[employer]]
+name = "BearingPoint Switzerland"
+ats = "teamtailor"
+board_id = "bearingpointag"
+
+[[employer]]
+name = "Windsor.ai"
+ats = "teamtailor"
+board_id = "windsorai"
+
+[[employer]]
+name = "Smart Media Agency"
+ats = "teamtailor"
+board_id = "smartmediaagency"
+
+[[employer]]
+name = "Ascom"
+ats = "teamtailor"
+board_id = "Ascom"
+
+[[employer]]
+name = "Hôpitaux Universitaires de Genève"
+ats = "smartrecruiters"
+board_id = "HUG"
+
+[[employer]]
+name = "Talan"
+ats = "smartrecruiters"
+board_id = "Talan"
+
+[[employer]]
+name = "Kanadevia Inova"
+ats = "smartrecruiters"
+board_id = "KanadeviaInova"
+
+[[employer]]
+name = "SMG Swiss Marketplace Group"
+ats = "smartrecruiters"
+board_id = "SMGSwissMarketplaceGroup"
+
+[[employer]]
+name = "Crealogix"
+ats = "smartrecruiters"
+board_id = "Crealogix"
+
+[[employer]]
+name = "Evooq"
+ats = "smartrecruiters"
+board_id = "Evooq"
+
+[[employer]]
+name = "CERN"
+ats = "smartrecruiters"
+board_id = "cern"
+
+[[employer]]
+name = "Sword Services"
+ats = "recruitee"
+board_id = "swordservices"
+
+[[employer]]
+name = "TWINT"
+ats = "recruitee"
+board_id = "twint"
+
+[[employer]]
+name = "Webrepublic"
+ats = "recruitee"
+board_id = "webrepublic"
+
+[[employer]]
+name = "CSP"
+ats = "recruitee"
+board_id = "csp"
+
+[[employer]]
+name = "CH Media"
+ats = "recruitee"
+board_id = "chmedia"
+
+[[employer]]
+name = "Netcetera"
+ats = "workable"
+board_id = "netcetera"
+
+[[employer]]
+name = "Flexion Robotics"
+ats = "workable"
+board_id = "flexion-robotics"

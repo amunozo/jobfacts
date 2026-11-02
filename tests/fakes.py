@@ -1,0 +1,54 @@
+"""Fake model clients for tests (no network)."""
+
+from types import SimpleNamespace
+
+from jobfacts.extract.posting import PostingText
+
+DESCRIPTION = (
+    "We build machine learning systems in Zürich. You will train models. "
+    "We need 3 years of experience. Fluent German is required. This is a hybrid role."
+)
+
+
+def posting(description: str = DESCRIPTION, location: str = "Zürich, Switzerland"):
+    return PostingText.build(1, "Senior ML Engineer", location, description)
+
+
+class FakeJev:
+    """Answers every Choice with its first option (or `pick[name]`) and every Noul with 0.9."""
+
+    def __init__(self, pick=None, noul=0.9):
+        self.pick, self.noul, self.calls = pick or {}, noul, []
+
+    def system_one(self, state, questions, model=None):
+        self.calls.append((state, questions, model))
+        answers = {}
+        for name, q in questions.items():
+            if hasattr(q, "criteria") and q.criteria is not None:
+                options = list(q.criteria)
+                choice = self.pick.get(name, options[0])
+                probs = {
+                    o: (0.8 if o == choice else 0.2 / max(1, len(options) - 1)) for o in options
+                }
+                answers[name] = SimpleNamespace(choice=choice, probabilities=probs, confidence=0.5)
+            else:
+                answers[name] = SimpleNamespace(noul=self.noul)
+        return SimpleNamespace(
+            answers=answers, usage=SimpleNamespace(input_tokens=1000, output_tokens=5), model="x"
+        )
+
+
+class FakeChat:
+    """OpenAI-style client that returns the queued replies one by one."""
+
+    def __init__(self, replies):
+        self.replies, self.calls = list(replies), []
+        self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._create))
+
+    def _create(self, **kwargs):
+        self.calls.append(kwargs)
+        content = self.replies.pop(0)
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=content))],
+            usage=SimpleNamespace(prompt_tokens=100, completion_tokens=50),
+        )

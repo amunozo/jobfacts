@@ -93,4 +93,4 @@ Order of evidence:
 
 When years and title disagree ("Senior ML Engineer, 2+ years"), years win,
 except that a staff/principal/lead/head-of title always gives
-`staff_principal`.
+`staff_principal`, and an internship title always gives `internship`.

@@ -1,6 +1,6 @@
 """One module per job board. Each exposes `fetch(client, board_id, extra) -> list[Posting]`."""
 
-from . import ashby, greenhouse, lever, recruitee, smartrecruiters, workable
+from . import ashby, greenhouse, lever, personio, recruitee, smartrecruiters, teamtailor, workable
 
 BOARDS = {
     "greenhouse": greenhouse.fetch,
@@ -9,4 +9,6 @@ BOARDS = {
     "smartrecruiters": smartrecruiters.fetch,
     "recruitee": recruitee.fetch,
     "workable": workable.fetch,
+    "personio": personio.fetch,
+    "teamtailor": teamtailor.fetch,
 }

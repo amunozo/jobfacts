@@ -1,4 +1,13 @@
-from jobfacts.collect.boards import ashby, greenhouse, lever, recruitee, smartrecruiters, workable
+from jobfacts.collect.boards import (
+    ashby,
+    greenhouse,
+    lever,
+    personio,
+    recruitee,
+    smartrecruiters,
+    teamtailor,
+    workable,
+)
 from jobfacts.collect.posting import parse_time
 from jobfacts.text import html_to_text
 
@@ -134,3 +143,67 @@ def test_smartrecruiters():
         "jobAd": {"sections": {"jobDescription": {"title": "Job", "text": "<p>Pipelines.</p>"}}}
     }
     assert smartrecruiters.parse_detail_text(detail) == "Job\nPipelines."
+
+
+PERSONIO_XML = """<?xml version="1.0" encoding="UTF-8"?>
+<workzag-jobs>
+  <position>
+    <id>101</id>
+    <office>Zürich</office>
+    <additionalOffices><office>Bern</office></additionalOffices>
+    <name>Data Scientist (m/w/d)</name>
+    <jobDescriptions>
+      <jobDescription><name>Ihre Aufgaben</name>
+        <value><![CDATA[<p>Modelle bauen.</p>]]></value></jobDescription>
+      <jobDescription><name>Ihr Profil</name>
+        <value><![CDATA[<ul><li>Python</li></ul>]]></value></jobDescription>
+    </jobDescriptions>
+    <createdAt>2026-10-05T09:30:00+00:00</createdAt>
+  </position>
+</workzag-jobs>"""
+
+
+def test_personio():
+    [p] = personio.parse(PERSONIO_XML, "acme")
+    assert p.source_job_id == "101"
+    assert p.url == "https://acme.jobs.personio.de/job/101"
+    assert p.title == "Data Scientist (m/w/d)"
+    assert p.location_raw == "Zürich / Bern"
+    assert p.description_text == "Ihre Aufgaben\nModelle bauen.\n\nIhr Profil\n- Python"
+    assert p.posted_at is not None
+
+
+def test_personio_rejects_other_documents():
+    import pytest
+
+    with pytest.raises(ValueError):
+        personio.parse("<html></html>", "acme")
+
+
+TEAMTAILOR_RSS = """<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:tt="https://teamtailor.com/locations">
+  <channel>
+    <title>Acme</title>
+    <item>
+      <title>ML Engineer</title>
+      <description>&lt;p&gt;Entraîner des modèles.&lt;/p&gt;</description>
+      <pubDate>Thu, 06 Aug 2026 17:27:26 +0200</pubDate>
+      <link>https://acme.teamtailor.com/jobs/1-ml-engineer</link>
+      <remoteStatus>hybrid</remoteStatus>
+      <guid>guid-1</guid>
+      <tt:locations>
+        <tt:location><tt:name>Lausanne</tt:name><tt:city>Lausanne</tt:city>
+          <tt:country>Switzerland</tt:country></tt:location>
+      </tt:locations>
+    </item>
+  </channel>
+</rss>"""
+
+
+def test_teamtailor():
+    [p] = teamtailor.parse(TEAMTAILOR_RSS)
+    assert p.source_job_id == "guid-1"
+    assert p.title == "ML Engineer"
+    assert p.location_raw == "Lausanne, Switzerland / (hybrid)"
+    assert p.description_text == "Entraîner des modèles."
+    assert p.posted_at is not None

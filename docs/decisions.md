@@ -112,3 +112,20 @@ Newest at the bottom.
 - **Also:** an empty response from a board with open postings counts as a
   failed read. Trade-off: if an employer truly closes every role, those
   postings stay open until it posts again.
+
+## 2026-11-02: Personio and Teamtailor added; JOIN, SuccessFactors, Homerun not
+- **What:** Personio (documented XML feed, no credentials) and Teamtailor
+  (documented public RSS feed) are collected. JOIN (only by reading page
+  HTML), SuccessFactors (official API needs credentials) and Homerun (feed
+  without stated terms) are not. job-room.ch has no public reading API.
+- **Why:** official feeds only; reading page HTML is scraping.
+
+## 2026-11-02: Extraction design as built
+- **What:** one field spec in code generates both Jev questions and the LLM
+  prompt; every model answers with sentence ids (title = T, location = L);
+  invalid LLM output gets one retry, then is stored as an error, never as a
+  value; Jev options list `not_stated` first.
+- **Why:** one source of truth; quotes exact for every model; Jev leans to
+  the first option, so the bias goes towards "not stated", not a guess.
+- **Models compared:** Jev 1.14.0, DeepSeek V4.1 Flash (non-thinking),
+  Mistral Small 2603 via OpenRouter.
