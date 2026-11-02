@@ -158,3 +158,10 @@ Newest at the bottom.
   the one route meant for machines. Evidence in `notes/workday_terms.md`.
 - **Rejected:** the `/wday/cxs/` JSON endpoint (undocumented, no
   permission); stays in the owner's private tool only.
+
+## 2026-11-02: Keep `not_stated` first in Jev options
+- **What:** measured on the 100 test postings: reversing or shuffling the
+  option order changes 0-3% of Jev answers per field, with no direction
+  towards or away from `not_stated`.
+- **Why:** the documented first-option bias is not measurable here, so the
+  original order stays.
