@@ -39,10 +39,11 @@ def save_relevance(
     )
 
 
-def relevant_ids(conn: psycopg.Connection, model: str) -> list[int]:
+def relevant_ids(conn: psycopg.Connection, model: str, origin: str = "board") -> list[int]:
     rows = conn.execute(
-        "SELECT posting_id FROM relevance WHERE model = %s AND relevant ORDER BY posting_id",
-        (model,),
+        "SELECT r.posting_id FROM relevance r JOIN postings p ON p.id = r.posting_id "
+        "WHERE r.model = %s AND r.relevant AND p.origin = %s ORDER BY r.posting_id",
+        (model, origin),
     )
     return [r[0] for r in rows]
 

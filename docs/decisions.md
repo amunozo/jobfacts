@@ -129,3 +129,21 @@ Newest at the bottom.
   the first option, so the bias goes towards "not stated", not a guess.
 - **Models compared:** Jev 1.14.0, DeepSeek V4.1 Flash (non-thinking),
   Mistral Small 2603 via OpenRouter.
+
+## 2026-11-02: Test set of 100, with non-AI German postings reported apart
+- **What:** ~50 application descriptions + ~50 collected postings; German
+  = all ~7 German AI postings + ~20 other Swiss German postings (max 3 per
+  employer), reported as a separate group. Full text snapshot kept in
+  `data/private/` so results stay reproducible.
+- **Why:** language wording does not depend on the role type; 7 postings
+  alone give a meaningless German accuracy (each one moves it 14 points).
+- **Rejected:** waiting weeks for German AI postings to accumulate.
+
+## 2026-11-02: Pre-fill labels with the majority of three models
+- **What:** first 30 postings blind; after that, each field is pre-filled
+  with the value 2 or 3 models agree on, without saying which model; no
+  pre-fill when all three differ. Labels also mark relevance.
+- **Why:** pre-filling from one model would anchor the owner towards it and
+  inflate that model's measured accuracy. The blind 30 measure how much
+  pre-filling shifts labels at all.
+- **Rejected:** pre-fill from Jev only (cheapest, but biased comparison).

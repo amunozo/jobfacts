@@ -154,3 +154,9 @@ def find_candidates(text: str, *, location_field: bool = False) -> list[Candidat
             out.extend(codes_found)
         out.sort(key=lambda c: c.start)
     return out
+
+
+def all_keys() -> set[str]:
+    """Every location key a label may use: cities, cantons, the country, outside_switzerland."""
+    _, names, _, _ = _load()
+    return {e.key for e in names.values()} | {"outside_switzerland"}

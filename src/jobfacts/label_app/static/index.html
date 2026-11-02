@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>jobfacts labelling</title></head>
+<body>
+<h1>jobfacts labelling</h1>
+<p>Placeholder page. The API is documented in docs/labelling.md.</p>
+<pre id="progress">loading...</pre>
+<script>
+fetch("/api/progress").then(r => r.json()).then(p => {
+  document.getElementById("progress").textContent = JSON.stringify(p, null, 2);
+});
+</script>
+</body>
+</html>

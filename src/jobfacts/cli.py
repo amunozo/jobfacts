@@ -1,6 +1,7 @@
 """Command line: `jobfacts migrate` and `jobfacts collect`."""
 
 import argparse
+from pathlib import Path
 
 from jobfacts import db
 from jobfacts.collect.run import collect
@@ -17,12 +18,32 @@ def main(argv: list[str] | None = None) -> int:
     ext.add_argument("--extractor", choices=["jev", "deepseek", "mistral"], required=True)
     ext.add_argument("--limit", type=int)
     ext.add_argument("--posting-ids", type=int, nargs="+")
+    imp = sub.add_parser("import-applications", help="import application job descriptions")
+    imp.add_argument("path", type=Path)
+    sub.add_parser("select-test-set", help="write data/private/test_set.jsonl")
+    sub.add_parser("label", help="start the labelling app on localhost")
     args = parser.parse_args(argv)
 
     with db.connect() as conn:
         if args.command == "migrate":
             applied = db.migrate(conn)
             print("applied: " + ", ".join(applied) if applied else "nothing to apply")
+            return 0
+        if args.command == "import-applications":
+            from jobfacts.applications import import_applications
+
+            c = import_applications(conn, args.path)
+            print(f"new {c.new}, updated {c.updated}, unchanged {c.unchanged}")
+            return 0
+        if args.command == "select-test-set":
+            from jobfacts.testset import select_test_set
+
+            select_test_set(conn)
+            return 0
+        if args.command == "label":
+            from jobfacts.label_app.server import serve
+
+            serve()
             return 0
         if args.command == "relevance":
             from jobfacts.extract import jev

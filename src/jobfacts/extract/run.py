@@ -55,7 +55,7 @@ def run_relevance(
 
 def eligible_ids(conn: psycopg.Connection, model: str = jev.MODEL) -> list[int]:
     """Relevant postings that pass decision 7a (Swiss location, or remote wording)."""
-    ids = store.relevant_ids(conn, model)
+    ids = store.relevant_ids(conn, model, origin="board")
     return [p.id for p in store.load_postings(conn, ids) if p.is_extraction_eligible()]
 
 
