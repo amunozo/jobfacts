@@ -49,12 +49,17 @@ def relevant_ids(conn: psycopg.Connection, model: str, origin: str = "board") ->
 
 
 def create_run(
-    conn: psycopg.Connection, extractor: str, model: str, spec_version: str, notes: str = ""
+    conn: psycopg.Connection,
+    extractor: str,
+    model: str,
+    spec_version: str,
+    notes: str = "",
+    purpose: str = "experiment",
 ) -> int:
     row = conn.execute(
-        "INSERT INTO extraction_runs (extractor, model, spec_version, notes) "
-        "VALUES (%s,%s,%s,%s) RETURNING id",
-        (extractor, model, spec_version, notes),
+        "INSERT INTO extraction_runs (extractor, model, spec_version, notes, purpose) "
+        "VALUES (%s,%s,%s,%s,%s) RETURNING id",
+        (extractor, model, spec_version, notes, purpose),
     ).fetchone()
     conn.commit()
     return row[0]
@@ -65,9 +70,29 @@ def finish_run(conn: psycopg.Connection, run_id: int) -> None:
     conn.commit()
 
 
-def save_extraction(conn: psycopg.Connection, run_id: int, posting_id: int, r: Result) -> None:
-    columns = ["run_id", "posting_id"]
-    values: list = [run_id, posting_id]
+def pending_search_ids(conn: psycopg.Connection, ids: list[int]) -> list[int]:
+    """Of these postings, the open board ones without a successful extraction made in a
+    search run for their current content_hash (new, changed, or failed before)."""
+    rows = conn.execute(
+        "SELECT p.id FROM postings p WHERE p.id = ANY(%s) AND p.closed_at IS NULL "
+        "AND p.origin = 'board' AND NOT EXISTS ("
+        " SELECT 1 FROM extractions e JOIN extraction_runs r ON r.id = e.run_id"
+        " WHERE e.posting_id = p.id AND r.purpose = 'search' AND e.error IS NULL"
+        " AND e.content_hash = p.content_hash) ORDER BY p.id",
+        (ids,),
+    )
+    return [r[0] for r in rows]
+
+
+def save_extraction(
+    conn: psycopg.Connection,
+    run_id: int,
+    posting_id: int,
+    r: Result,
+    content_hash: str | None = None,
+) -> None:
+    columns = ["run_id", "posting_id", "content_hash"]
+    values: list = [run_id, posting_id, content_hash]
     if not r.error:
         for name in FIELDS:
             columns += [name, f"{name}_sentences"]

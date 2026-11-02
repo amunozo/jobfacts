@@ -178,3 +178,17 @@ Newest at the bottom.
   (Ibach, Netstal, Grancia). Accuracy is measured at canton level first.
 - **Rejected:** a model choice over communes (Bern and Vaud have ~300 each,
   over Jev's 255-option limit); the hand-made list of ~255 places.
+
+## 2026-11-02: Command-line search
+- **What:** PostgreSQL full-text search (`simple` configuration, title
+  weighted above description, GIN index) over open, relevant board
+  postings, using each posting's latest Jev extraction. Language filters
+  are "the most I accept" (`--german-max none|intermediate|fluent`);
+  "required, level not stated" is hidden below fluent unless asked.
+  `--canton` and `--remote` combine with OR ("here, or remote from
+  Switzerland"); all other filters combine with AND. `--json` for other
+  programs.
+- **Why:** `simple` works the same for EN/DE/FR (no stemming, so "model"
+  does not match "models"; meaning-based search comes in Milestone 2).
+  OR between canton and remote matches how the owner looks for roles.
+- **Rejected:** one language-specific stemmer (would mangle the other two).

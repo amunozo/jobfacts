@@ -71,20 +71,32 @@ def run_extraction(
     posting_ids: list[int] | None = None,
     limit: int | None = None,
     notes: str = "",
+    for_search: bool = False,
 ) -> tuple[int, list[Result]]:
-    """Extract and store one run. Without ids: all eligible postings. Returns (run id, results)."""
+    """Extract and store one run. Without ids: all eligible postings. Returns (run id, results).
+
+    for_search: a run that feeds `jobfacts search`; only open board postings that have no
+    successful search-run extraction for their current content are read (incremental)."""
     ids = posting_ids or eligible_ids(conn)
+    if for_search:
+        ids = store.pending_search_ids(conn, ids) if ids else []
     if limit:
         ids = ids[:limit]
-    postings = store.load_postings(conn, ids)
+    postings = store.load_postings(conn, ids) if ids else []
+    hashes = dict(conn.execute("SELECT id, content_hash FROM postings WHERE id = ANY(%s)", (ids,)))
     run_id = store.create_run(
-        conn, extractor.name, extractor.model, extractor.spec_version(), notes
+        conn,
+        extractor.name,
+        extractor.model,
+        extractor.spec_version(),
+        notes,
+        "search" if for_search else "experiment",
     )
     results: list[Result] = []
     with ThreadPoolExecutor(CONCURRENCY) as pool:
         for p, result in zip(postings, pool.map(extractor.extract, postings), strict=True):
             add_places(p, result)
-            store.save_extraction(conn, run_id, p.id, result)
+            store.save_extraction(conn, run_id, p.id, result, hashes.get(p.id))
             results.append(result)
     store.finish_run(conn, run_id)
     return run_id, results
