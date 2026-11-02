@@ -160,3 +160,17 @@ def all_keys() -> set[str]:
     """Every location key a label may use: cities, cantons, the country, outside_switzerland."""
     _, names, _, _ = _load()
     return {e.key for e in names.values()} | {"outside_switzerland"}
+
+
+def canton_of(key: str) -> str:
+    """Canton code of a location key (`city:Zürich` -> `ZH`, `canton:ZH` -> `ZH`).
+
+    `country:CH` and `outside_switzerland` stay as they are; unknown keys too.
+    """
+    if key.startswith("canton:"):
+        return key.removeprefix("canton:")
+    _, names, _, _ = _load()
+    for entry in names.values():
+        if entry.key == key and entry.canton:
+            return entry.canton
+    return key

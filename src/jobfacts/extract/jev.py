@@ -20,6 +20,7 @@ from jobfacts.extract.spec import (
     LOCATION_QUESTION,
     RELEVANCE_QUESTION,
     TITLE_ID,
+    order_values,
     spec_hash,
 )
 
@@ -49,14 +50,14 @@ def build_state(p: PostingText) -> str:
     )
 
 
-def build_questions(p: PostingText) -> dict[str, Any]:
+def build_questions(p: PostingText, ordering: str = "original") -> dict[str, Any]:
     """All questions for one posting (names: v_<field>, s_<field>_<k>, loc_<i>)."""
     questions: dict[str, Any] = {}
     ids = [TITLE_ID, LOCATION_ID, *(s.id for s in p.sentences)]
     for f in FIELDS.values():
         questions[f"v_{f.name}"] = Choice(
             instructions=f"{GENERAL_RULES} {f.question}",
-            criteria=dict(f.values),
+            criteria=order_values(f.name, f.values, ordering),
         )
         for k, part in enumerate(chunks(ids)):
             questions[f"s_{f.name}_{k}"] = Choice(
@@ -95,15 +96,20 @@ class JevExtractor:
     name = "jev"
     model = MODEL
 
-    def __init__(self, client: Any | None = None) -> None:
+    def __init__(self, client: Any | None = None, ordering: str = "original") -> None:
         self.client = client or make_client()
+        order_values("x", {}, ordering)  # validates the name
+        self.ordering = ordering
 
     def spec_version(self) -> str:
-        return spec_hash("jev:" + GENERAL_RULES)
+        extra = "jev:" + GENERAL_RULES
+        if self.ordering != "original":
+            extra += f"|order:{self.ordering}"  # default hash stays unchanged
+        return spec_hash(extra)
 
     def extract(self, p: PostingText) -> Result:
         result = Result()
-        questions = build_questions(p)
+        questions = build_questions(p, self.ordering)
         started = time.monotonic()
         try:
             response = self.client.system_one(
@@ -120,6 +126,8 @@ class JevExtractor:
         answers = response.answers
         n_chunks = len(chunks([TITLE_ID, LOCATION_ID, *(s.id for s in p.sentences)]))
         details: dict[str, Any] = {"model_returned": getattr(response, "model", None)}
+        if self.ordering != "original":
+            details["ordering"] = self.ordering
         for f in FIELDS.values():
             a = answers[f"v_{f.name}"]
             value = a.choice

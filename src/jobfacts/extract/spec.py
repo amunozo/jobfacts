@@ -9,6 +9,7 @@ first, so the model has to find evidence before choosing anything else.
 
 import hashlib
 import json
+import random
 from dataclasses import dataclass
 
 # Sentence ids shown to the models. Posting sentences are 1..n (jobfacts.sentences.split).
@@ -165,6 +166,25 @@ def derive_seniority(min_years: str, title_level: str) -> str:
     if title_level in SENIORITY_VALUES:
         return title_level
     return "not_stated"
+
+
+ORDERINGS = ("original", "reversed", "shuffled")
+SHUFFLE_SEED = 20261102
+
+
+def order_values(field_name: str, values: dict[str, str], ordering: str) -> dict[str, str]:
+    """The value options in the requested order (`original` = as defined in FIELDS).
+
+    `shuffled` uses a fixed seed per field, so the same order is produced on every run.
+    """
+    items = list(values.items())
+    if ordering == "reversed":
+        items.reverse()
+    elif ordering == "shuffled":
+        random.Random(f"{SHUFFLE_SEED}:{field_name}").shuffle(items)
+    elif ordering != "original":
+        raise ValueError(f"unknown ordering {ordering!r}")
+    return dict(items)
 
 
 def spec_hash(extra: str = "") -> str:

@@ -26,6 +26,13 @@ def main(argv: list[str] | None = None) -> int:
     lab.add_argument(
         "--data-dir", type=Path, help="folder with test_set.jsonl (default data/private)"
     )
+    ev = sub.add_parser("evaluate", help="write the accuracy report (Markdown) from the labels")
+    ev.add_argument("--data-dir", type=Path, help="folder with the test set (default data/private)")
+    oo = sub.add_parser(
+        "jev-order-test", help="run Jev with reversed and shuffled options on the test set"
+    )
+    oo.add_argument("--data-dir", type=Path, help="folder with the test set (default data/private)")
+    oo.add_argument("--force", action="store_true", help="rerun variants that already have a run")
     args = parser.parse_args(argv)
 
     with db.connect() as conn:
@@ -49,6 +56,31 @@ def main(argv: list[str] | None = None) -> int:
             from jobfacts.testset import PRIVATE_DIR
 
             serve(args.port, args.data_dir or PRIVATE_DIR)
+            return 0
+        if args.command == "evaluate":
+            from jobfacts import labels
+            from jobfacts.evaluate import run_evaluate, summary_lines
+            from jobfacts.testset import PRIVATE_DIR
+
+            data_dir = args.data_dir or PRIVATE_DIR
+            text, path = run_evaluate(conn, data_dir)
+            print(summary_lines(text, len(labels.latest(data_dir / "labels.jsonl"))))
+            print(f"\nreport: {path}")
+            return 0
+        if args.command == "jev-order-test":
+            from jobfacts import evaluate, ordertest
+            from jobfacts.testset import PRIVATE_DIR
+
+            data_dir = args.data_dir or PRIVATE_DIR
+            new = ordertest.run_order_test(conn, data_dir, force=args.force)
+            print(f"new runs: {new or 'none (already present; use --force)'}")
+            runs = ordertest.read_runs(data_dir / "test_set_runs.json")
+            exts = {k: evaluate.load_run(conn, runs[k]) for k in runs if k.startswith("jev")}
+            for k in exts:
+                if k != "jev":
+                    cost = evaluate.cost_summary(exts[k])
+                    print(f"{k}: run {runs[k]}, ${cost['cost']:.4f}, errors {cost['errors']}")
+            print(ordertest.render(evaluate.order_comparisons(exts)))
             return 0
         if args.command == "relevance":
             from jobfacts.extract import jev
