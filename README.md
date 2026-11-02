@@ -85,6 +85,10 @@ The evaluation is the core of the project, not an extra.
 - **Test set:** about 150 postings, labelled by hand by the person who uses
   the tool every day. Each label is a field value plus the supporting
   sentence. Postings in German, French and English are all included.
+- **Labelling is mostly one-time per field:** the same labels are reused when
+  the model or prompt changes. New fields (Milestones 3 and 4) need their own
+  small rounds of about 50 postings, and a monthly spot check of 10-20 new
+  postings catches drift (employers changing formats, model updates).
 - **Extraction accuracy:** measured per field and per posting language.
 - **Model choice:** at least two LLMs compared on accuracy and on cost per
   posting.
@@ -111,6 +115,11 @@ The evaluation is the core of the project, not an extra.
 - Relevance filter for AI and data roles.
 - Extraction of three fields: work mode and remote eligibility, language
   requirement, seniority. Each with a quote.
+- A small local labelling web app: it shows a posting next to the fields,
+  the owner picks each value and marks the supporting sentence, and labels
+  are saved to `data/private/`. It has a blind mode (model answers hidden)
+  for the first 30 postings, then shows the model's pre-filled answers to
+  confirm or correct.
 - 100 labelled postings and an accuracy table per field.
 - A command-line search with these filters.
 - Done when the daily run has worked for a week and the search is used instead
