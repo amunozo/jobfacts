@@ -1,7 +1,7 @@
 """The common shape every board module produces."""
 
 import hashlib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
 
@@ -13,6 +13,7 @@ class Posting:
     location_raw: str = ""
     description_text: str = ""
     posted_at: datetime | None = None
+    source_version: str | None = None  # not part of the content hash
 
     @property
     def content_hash(self) -> str:
@@ -32,3 +33,19 @@ def parse_time(value: object) -> datetime | None:
     except (ValueError, OverflowError, OSError):
         return None
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+
+
+@dataclass
+class BoardRead:
+    """Result of an incremental board read (Workday).
+
+    `postings` holds only the postings actually fetched this time. `seen_ids` holds the id of
+    every posting the board listed, fetched or not; stored postings missing from it get closed.
+    `close_missing` is False when the board's list is known to be partial.
+    `notes` is a one-line report for the run summary.
+    """
+
+    postings: list[Posting] = field(default_factory=list)
+    seen_ids: set[str] = field(default_factory=set)
+    notes: str = ""
+    close_missing: bool = True  # False when the list is known to be incomplete

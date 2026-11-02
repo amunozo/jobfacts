@@ -9,6 +9,7 @@ import psycopg
 from jobfacts.collect import store
 from jobfacts.collect.boards import BOARDS
 from jobfacts.collect.http import make_client
+from jobfacts.collect.posting import BoardRead
 
 MAX_WORKERS = 6
 
@@ -20,6 +21,7 @@ class RunSummary:
     boards_failed: int = 0
     counts: store.Counts = field(default_factory=store.Counts)
     failures: list[tuple[str, str]] = field(default_factory=list)
+    notes: list[tuple[str, str]] = field(default_factory=list)
     seconds: float = 0.0
 
 
@@ -36,27 +38,48 @@ def collect(
         e for e in employers if e[2] in fetchers and (only is None or only in (e[1], e[2]))
     ]
     summary = RunSummary(run_id=store.start_run(conn))
+    # Incremental fetchers (Workday) get what is already stored, so they read only the new.
+    known = {
+        e[0]: store.known_versions(conn, e[0])
+        for e in employers
+        if getattr(fetchers[e[2]], "incremental", False)
+    }
 
     def read(employer):
-        _, _, ats, board_id, extra = employer
+        employer_id, _, ats, board_id, extra = employer
         try:
             with make_client() as client:
-                return employer, fetchers[ats](client, board_id, extra or {}), None
+                if employer_id in known:
+                    result = fetchers[ats](client, board_id, extra or {}, known[employer_id])
+                else:
+                    result = fetchers[ats](client, board_id, extra or {})
+                if not isinstance(result, BoardRead):
+                    result = BoardRead(postings=result)
+                return employer, result, None
         except Exception as error:  # noqa: BLE001 - any failure means "board not read"
             return employer, None, f"{type(error).__name__}: {error}"
 
     # Boards are fetched in parallel (limited); all database writes stay in this thread.
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
-        for employer, postings, error in pool.map(read, employers):
+        for employer, result, error in pool.map(read, employers):
             employer_id, name = employer[0], employer[1]
-            if error is None and not postings:
+            if error is None and not result.postings and not result.seen_ids:
                 open_now = store.open_count(conn, employer_id)
                 if open_now:
                     # An empty answer from a board that had open postings is more
                     # likely a glitch than every role closing at once.
                     error = f"empty response while {open_now} postings were open; nothing closed"
             if error is None:
-                c = store.record_success(conn, summary.run_id, employer_id, postings)
+                c = store.record_success(
+                    conn,
+                    summary.run_id,
+                    employer_id,
+                    result.postings,
+                    result.seen_ids,
+                    result.close_missing,
+                )
+                if result.notes:
+                    summary.notes.append((name, result.notes))
                 summary.boards_ok += 1
                 summary.counts.new += c.new
                 summary.counts.updated += c.updated

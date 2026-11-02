@@ -1,5 +1,6 @@
 # Employers whose public job boards the collector reads.
 # Fields: name, ats, board_id; optional: eu = true (Lever EU host), url = full feed address (Teamtailor custom domain).
+# Workday (opt-in, sitemap + JSON-LD only, see notes/workday_terms.md): board_id = tenant, wd = host number, site = career site name, prefilter = false to read every page.
 
 [[employer]]
 name = "DeepJudge"
@@ -633,3 +634,97 @@ board_id = "netcetera"
 name = "Flexion Robotics"
 ats = "workable"
 board_id = "flexion-robotics"
+
+[[employer]]
+name = "Disney Research"
+ats = "workday"
+board_id = "disney"
+wd = "wd5"
+site = "disneycareer"
+
+[[employer]]
+name = "Logitech"
+ats = "workday"
+board_id = "logitech"
+wd = "wd5"
+site = "Logitech"
+
+[[employer]]
+name = "Julius Baer"
+ats = "workday"
+board_id = "juliusbaer"
+wd = "wd3"
+site = "External"
+
+[[employer]]
+name = "Novartis"
+ats = "workday"
+board_id = "novartis"
+wd = "wd3"
+site = "Novartis_Careers"
+
+[[employer]]
+name = "Roche"
+ats = "workday"
+board_id = "roche"
+wd = "wd3"
+site = "roche-ext"
+
+[[employer]]
+name = "Lonza"
+ats = "workday"
+board_id = "lonza"
+wd = "wd3"
+site = "Lonza_Careers"
+
+[[employer]]
+name = "NVIDIA"
+ats = "workday"
+board_id = "nvidia"
+wd = "wd5"
+site = "NVIDIAExternalCareerSite"
+
+[[employer]]
+name = "Thomson Reuters"
+ats = "workday"
+board_id = "thomsonreuters"
+wd = "wd5"
+site = "External_Career_Site"
+
+[[employer]]
+name = "IQVIA"
+ats = "workday"
+board_id = "iqvia"
+wd = "wd1"
+site = "IQVIA"
+
+[[employer]]
+name = "Expedia Group"
+ats = "workday"
+board_id = "expedia"
+wd = "wd108"
+site = "search"
+
+[[employer]]
+name = "Swisscom"
+ats = "workday"
+board_id = "swisscom"
+wd = "wd103"
+site = "SwisscomExternalCareers"
+prefilter = false  # all jobs are Swiss; the URL filter missed small places (Netstal, Ibach)
+
+[[employer]]
+name = "Hitachi Energy"
+ats = "workday"
+board_id = "hitachi"
+wd = "wd1"
+site = "hitachi"
+
+[[employer]]
+name = "Datasite"
+ats = "workday"
+board_id = "datasite"
+wd = "wd1"
+site = "datasite"
+
+# Swiss Life (swisslife / wd3 / Swiss_Life_Career_Site) left out: its robots.txt disallows the sitemap (checked 2026-11-02).

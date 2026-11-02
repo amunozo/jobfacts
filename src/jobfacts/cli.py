@@ -73,6 +73,8 @@ def main(argv: list[str] | None = None) -> int:
         f"run {summary.run_id}: boards ok {summary.boards_ok}, failed {summary.boards_failed}; "
         f"new {c.new}, updated {c.updated}, closed {c.closed}; {summary.seconds:.0f}s"
     )
+    for name, note in summary.notes:
+        print(f"  {name}: {note}")
     for name, error in summary.failures:
         print(f"  FAILED {name}: {error}")
     return 0

@@ -72,10 +72,28 @@ def open_count(conn: psycopg.Connection, employer_id: int) -> int:
     ).fetchone()[0]
 
 
+def known_versions(conn: psycopg.Connection, employer_id: int) -> dict[str, str | None]:
+    """Open postings of an employer with their stored source version (for incremental reads)."""
+    rows = conn.execute(
+        "SELECT source_job_id, source_version FROM postings "
+        "WHERE employer_id = %s AND closed_at IS NULL",
+        (employer_id,),
+    )
+    return {job_id: version for job_id, version in rows}
+
+
 def record_success(
-    conn: psycopg.Connection, run_id: int, employer_id: int, postings: list[Posting]
+    conn: psycopg.Connection,
+    run_id: int,
+    employer_id: int,
+    postings: list[Posting],
+    seen_ids: frozenset[str] | set[str] = frozenset(),
+    close_missing: bool = True,
 ) -> Counts:
-    """Store a successful read in one transaction: insert, update, reopen, close the missing."""
+    """Store a successful read in one transaction: insert, update, reopen, close the missing.
+
+    `seen_ids` are postings the board listed but the collector did not re-read; they stay open.
+    """
     counts = Counts()
     unique = {p.source_job_id: p for p in postings}
     with conn.transaction():
@@ -91,7 +109,8 @@ def record_success(
             if job_id not in existing:
                 conn.execute(
                     "INSERT INTO postings (employer_id, source_job_id, url, title, location_raw, "
-                    "description_text, posted_at, content_hash) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
+                    "description_text, posted_at, content_hash, source_version) "
+                    "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
                     (
                         employer_id,
                         job_id,
@@ -101,6 +120,7 @@ def record_success(
                         p.description_text,
                         p.posted_at,
                         p.content_hash,
+                        p.source_version,
                     ),
                 )
                 counts.new += 1
@@ -109,7 +129,8 @@ def record_success(
             if old_hash != p.content_hash or closed_at is not None:
                 conn.execute(
                     "UPDATE postings SET url=%s, title=%s, location_raw=%s, description_text=%s, "
-                    "posted_at=%s, content_hash=%s, last_seen_at=now(), closed_at=NULL "
+                    "posted_at=%s, content_hash=%s, source_version=%s, last_seen_at=now(), "
+                    "closed_at=NULL "
                     "WHERE employer_id=%s AND source_job_id=%s",
                     (
                         p.url,
@@ -118,6 +139,7 @@ def record_success(
                         p.description_text,
                         p.posted_at,
                         p.content_hash,
+                        p.source_version,
                         employer_id,
                         job_id,
                     ),
@@ -125,19 +147,27 @@ def record_success(
                 counts.updated += 1
             else:
                 conn.execute(
-                    "UPDATE postings SET last_seen_at = now() "
+                    "UPDATE postings SET last_seen_at = now(), source_version = %s "
                     "WHERE employer_id = %s AND source_job_id = %s",
-                    (employer_id, job_id),
+                    (p.source_version, employer_id, job_id),
                 )
-        closed = conn.execute(
-            "UPDATE postings SET closed_at = now() WHERE employer_id = %s "
-            "AND closed_at IS NULL AND NOT (source_job_id = ANY(%s))",
-            (employer_id, list(unique)),
-        )
-        counts.closed = closed.rowcount
+        keep = list(set(unique) | set(seen_ids))
+        if seen_ids:
+            conn.execute(
+                "UPDATE postings SET last_seen_at = now() WHERE employer_id = %s "
+                "AND closed_at IS NULL AND source_job_id = ANY(%s)",
+                (employer_id, list(seen_ids)),
+            )
+        if close_missing:
+            closed = conn.execute(
+                "UPDATE postings SET closed_at = now() WHERE employer_id = %s "
+                "AND closed_at IS NULL AND NOT (source_job_id = ANY(%s))",
+                (employer_id, keep),
+            )
+            counts.closed = closed.rowcount
         conn.execute(
             "INSERT INTO board_reads (run_id, employer_id, ok, postings_seen) "
             "VALUES (%s, %s, true, %s)",
-            (run_id, employer_id, len(unique)),
+            (run_id, employer_id, len(keep)),
         )
     return counts

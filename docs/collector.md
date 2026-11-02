@@ -43,3 +43,24 @@ throwaway schema `test_jobfacts` in the compose database and are skipped
   as a failed read (likely a glitch), so nothing is closed. If the employer
   really closed every role, its postings stay open until a non-empty read;
   check `board_reads` errors if a board keeps returning empty.
+
+## Workday (opt-in, sitemap + JSON-LD only)
+
+Employers with `ats = "workday"` (`board_id` = tenant, `wd` = host number, `site` = career
+site) are read the way search engines read them: `robots.txt` first (disallowed URLs are never
+requested; a disallowed sitemap fails the read), then `/<site>/siteMap.xml`, then the
+`JobPosting` JSON-LD of each posting page. The `/wday/cxs/` JSON endpoint is not used. See
+`notes/workday_terms.md`.
+
+- One request per second per host (shared across threads), plus the usual retry/backoff.
+  A 403/429 on a page stops that employer's read; the rest waits for the next run.
+- Only pages whose URL location segment looks Swiss or remote are fetched. Set
+  `prefilter = false` on an employer whose jobs are all Swiss (Swisscom).
+  `scripts/workday_prefilter_check.py` samples skipped URLs to check the filter.
+- Incremental: a page is fetched only if the job id is new or the sitemap `lastmod` changed
+  (`postings.source_version`). The sitemaps seen so far carry no `lastmod`, so known
+  postings are not re-read.
+- A stored posting missing from the sitemap is closed. Exception: a sitemap with exactly 100
+  entries is a capped list (most big tenants), so nothing is closed for it.
+- "Remote" is added for `jobLocationType = TELECOMMUTE`, unless nearly every posting of the
+  employer has it (several tenants flag everything).
