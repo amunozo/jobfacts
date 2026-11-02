@@ -21,7 +21,11 @@ def main(argv: list[str] | None = None) -> int:
     imp = sub.add_parser("import-applications", help="import application job descriptions")
     imp.add_argument("path", type=Path)
     sub.add_parser("select-test-set", help="write data/private/test_set.jsonl")
-    sub.add_parser("label", help="start the labelling app on localhost")
+    lab = sub.add_parser("label", help="start the labelling app on localhost")
+    lab.add_argument("--port", type=int, default=8765)
+    lab.add_argument(
+        "--data-dir", type=Path, help="folder with test_set.jsonl (default data/private)"
+    )
     args = parser.parse_args(argv)
 
     with db.connect() as conn:
@@ -42,8 +46,9 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.command == "label":
             from jobfacts.label_app.server import serve
+            from jobfacts.testset import PRIVATE_DIR
 
-            serve()
+            serve(args.port, args.data_dir or PRIVATE_DIR)
             return 0
         if args.command == "relevance":
             from jobfacts.extract import jev

@@ -4,6 +4,12 @@ The owner labels the test set (`data/private/test_set.jsonl`, 100 postings) in a
 local web page. The page talks to a small JSON API (FastAPI, `src/jobfacts/label_app/`).
 Start it with `uv run jobfacts label`; it listens on `127.0.0.1:8765` only.
 All data stays in `data/private/` (git-ignored). The examples below are made up.
+`--data-dir DIR` reads `test_set.jsonl` and `test_set_runs.json` from `DIR` and writes
+`DIR/labels.jsonl` instead (for trying the app on a copy); `--port` changes the port.
+
+The page (`static/`: `index.html`, `app.css`, `app.js`, plain files, no build step) shows
+the posting as numbered sentences on the left and the label form on the right. Press `?`
+in the page for the keyboard shortcuts.
 
 ## Files (all in `data/private/`)
 

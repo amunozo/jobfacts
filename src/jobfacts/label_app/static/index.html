@@ -1,15 +1,75 @@
 <!doctype html>
 <html lang="en">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>jobfacts labelling</title></head>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>jobfacts labelling</title>
+<link rel="stylesheet" href="app.css">
+</head>
 <body>
-<h1>jobfacts labelling</h1>
-<p>Placeholder page. The API is documented in docs/labelling.md.</p>
-<pre id="progress">loading...</pre>
-<script>
-fetch("/api/progress").then(r => r.json()).then(p => {
-  document.getElementById("progress").textContent = JSON.stringify(p, null, 2);
-});
-</script>
+<header class="top">
+  <div class="top-left">
+    <button id="jump-open" class="btn ghost" title="Jump to a posting (G)">☰ Postings</button>
+    <button id="prev-item" class="btn ghost icon" title="Previous posting ([)">‹</button>
+    <span id="pos" class="pos"></span>
+    <button id="next-item" class="btn ghost icon" title="Next posting (])">›</button>
+    <span id="badges" class="badges"></span>
+  </div>
+  <div id="progress" class="progress"></div>
+</header>
+
+<main class="layout">
+  <section class="posting" id="posting" aria-label="Posting"></section>
+  <aside class="form" id="form" aria-label="Label form">
+    <div id="form-body"></div>
+    <div class="form-foot">
+      <div id="global-msg" class="global-msg" role="status"></div>
+      <div class="actions">
+        <button id="confirm-all" class="btn" title="Confirm every remaining suggestion (Shift+A)">Confirm all suggestions</button>
+        <button id="save" class="btn primary" title="Save and go to the next unlabelled posting (Ctrl+Enter)">Save &amp; next</button>
+      </div>
+      <div class="legend">
+        <span><kbd>J</kbd><kbd>K</kbd> field</span>
+        <span><kbd>1</kbd>–<kbd>9</kbd> value</span>
+        <span>click sentence = evidence</span>
+        <span><kbd>Enter</kbd> confirm</span>
+        <span><kbd>⇧A</kbd> confirm all</span>
+        <span><kbd>Ctrl</kbd><kbd>Enter</kbd> save</span>
+        <span><kbd>[</kbd><kbd>]</kbd> posting</span>
+        <span><kbd>G</kbd> jump</span>
+        <span><kbd>?</kbd> more</span>
+      </div>
+    </div>
+  </aside>
+</main>
+
+<dialog id="jump" class="dlg">
+  <div class="dlg-head">
+    <input id="jump-filter" type="search" placeholder="Filter: employer, title, en/de/fr, group, todo/done…" autocomplete="off">
+    <button class="btn ghost" data-close>Esc</button>
+  </div>
+  <div class="jump-list" id="jump-list"></div>
+</dialog>
+
+<dialog id="help" class="dlg help">
+  <div class="dlg-head"><strong>Keyboard shortcuts</strong><button class="btn ghost" data-close>Esc</button></div>
+  <table class="keys">
+    <tr><td><kbd>J</kbd> / <kbd>↓</kbd>, <kbd>K</kbd> / <kbd>↑</kbd></td><td>Next / previous field</td></tr>
+    <tr><td><kbd>1</kbd>…<kbd>9</kbd></td><td>Pick the value with that number in the active field (locations: toggle candidate)</td></tr>
+    <tr><td>Min. years</td><td>Type the number (<kbd>1</kbd><kbd>2</kbd> = 12), <kbd>N</kbd> = not stated, <kbd>+</kbd> = 15_plus</td></tr>
+    <tr><td>Click a sentence</td><td>Toggle it as evidence for the active field</td></tr>
+    <tr><td><kbd>Enter</kbd></td><td>Confirm the active field (accepts a suggestion) and move on</td></tr>
+    <tr><td><kbd>Shift</kbd>+<kbd>A</kbd></td><td>Confirm all remaining suggestions</td></tr>
+    <tr><td><kbd>Ctrl</kbd>+<kbd>Enter</kbd></td><td>Save and go to the next unlabelled posting</td></tr>
+    <tr><td><kbd>[</kbd> / <kbd>]</kbd></td><td>Previous / next posting (warns about unsaved changes)</td></tr>
+    <tr><td><kbd>U</kbd></td><td>Next unlabelled posting</td></tr>
+    <tr><td><kbd>/</kbd></td><td>Search locations to add (in the locations field)</td></tr>
+    <tr><td><kbd>E</kbd></td><td>Note for the active field; <kbd>Shift</kbd>+<kbd>E</kbd> note for the posting</td></tr>
+    <tr><td><kbd>G</kbd></td><td>Jump to a posting</td></tr>
+    <tr><td><kbd>Esc</kbd></td><td>Leave a text box or close a dialog</td></tr>
+  </table>
+</dialog>
+
+<script src="app.js"></script>
 </body>
 </html>

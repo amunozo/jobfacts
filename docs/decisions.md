@@ -147,3 +147,14 @@ Newest at the bottom.
   inflate that model's measured accuracy. The blind 30 measure how much
   pre-filling shifts labels at all.
 - **Rejected:** pre-fill from Jev only (cheapest, but biased comparison).
+
+## 2026-11-02: Workday read through sitemap + JSON-LD only
+- **What:** Workday career sites are read through their sitemap and the
+  schema.org `JobPosting` data on each posting page, which they publish for
+  search engines. Opt-in per employer, `robots.txt` obeyed, at most 1
+  request per second per host, only new or changed pages, and a URL
+  pre-filter for Swiss or remote postings.
+- **Why:** big Swiss pharma and bank employers are only on Workday; this is
+  the one route meant for machines. Evidence in `notes/workday_terms.md`.
+- **Rejected:** the `/wday/cxs/` JSON endpoint (undocumented, no
+  permission); stays in the owner's private tool only.

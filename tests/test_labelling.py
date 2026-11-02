@@ -193,3 +193,14 @@ def test_spec_endpoint(client):
     work = next(f for f in spec["fields"] if f["name"] == "work_mode")
     assert {v["value"] for v in work["values"]} == set(FIELDS["work_mode"].values)
     assert "outside_switzerland" in spec["location_keys"]
+
+
+def test_build_app_reads_and_writes_the_given_data_dir(tmp_path, conn):
+    from jobfacts.label_app.server import build_app
+
+    (tmp_path / "test_set.jsonl").write_text(json.dumps(item(1, 0)) + "\n")
+    (tmp_path / "test_set_runs.json").write_text('{"jev": 999}')
+    c = TestClient(build_app(tmp_path, conn))
+    assert [x["posting_id"] for x in c.get("/api/items").json()] == [1]
+    assert c.put("/api/items/1/label", json=payload()).status_code == 200
+    assert len(labels.load_all(tmp_path / "labels.jsonl")) == 1
