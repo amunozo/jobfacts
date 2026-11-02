@@ -3,7 +3,11 @@ name = "jobfacts"
 version = "0.1.0"
 description = "The facts a job posting hides: collector, extraction and search."
 requires-python = ">=3.12"
-dependencies = ["httpx>=0.27", "psycopg[binary]>=3.2"]
+dependencies = [
+    "httpx>=0.27",
+    "lingua-language-detector>=2.2.0",
+    "psycopg[binary]>=3.2",
+]
 
 [project.scripts]
 jobfacts = "jobfacts.cli:main"
