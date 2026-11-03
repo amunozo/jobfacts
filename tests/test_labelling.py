@@ -211,6 +211,24 @@ def test_items_and_progress(client):
     }
 
 
+def test_item_sends_text_and_sentence_offsets(client):
+    it = client.get("/api/items/1").json()
+    text = it["description_text"]
+    assert text.startswith("We work in a hybrid mode.")
+    assert len(it["offsets"]) == len(it["sentences"])
+    for s, (start, end) in zip(it["sentences"], it["offsets"], strict=True):
+        assert text[start:end] == s["text"]
+
+
+def test_item_offsets_missing_when_sentences_do_not_match(tmp_path):
+    stale = item(1, 0)
+    stale["sentences"][1]["text"] = "You have 5 years of experience."  # differs from a re-split
+    c = TestClient(create_app([stale], tmp_path / "labels.jsonl"))
+    it = c.get("/api/items/1").json()
+    assert it["offsets"] is None
+    assert it["sentences"] == stale["sentences"]
+
+
 def test_spec_endpoint(client):
     spec = client.get("/api/spec").json()
     work = next(f for f in spec["fields"] if f["name"] == "work_mode")

@@ -157,6 +157,13 @@ The evaluation is the core of the project, not an extra.
 Milestones 3 and 4 start only after Milestones 1 and 2 are finished.
 
 **Later (not planned yet):**
+- More feed types, each only after a terms check: prospective.ch JSON
+  (Swiss federal administration, several universities), Oracle Recruiting
+  (Canton of Vaud) and HiBob. Career sites readable only as page HTML stay
+  out (see `docs/decisions.md`).
+- Keep each posting's original HTML (new column, re-collect) so the
+  labelling page can show real formatting such as bold, links and heading
+  levels. Today only the plain text is stored.
 - An MCP server (the standard way for LLM agents to call tools) wrapping the
   search API, so assistants such as Claude can search postings directly.
 - Language requirements for English and Italian (Milestone 1 extracts

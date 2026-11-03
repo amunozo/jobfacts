@@ -192,3 +192,26 @@ Newest at the bottom.
   does not match "models"; meaning-based search comes in Milestone 2).
   OR between canton and remote matches how the owner looks for roles.
 - **Rejected:** one language-specific stemmer (would mangle the other two).
+
+## 2026-11-03: New watchlist employers: API boards only
+- **What:** of 23 employers added to the private watchlist, only Exa and
+  Deepgram (Ashby) are collected now. prospective.ch, Oracle Recruiting and
+  HiBob are listed under README "Later", each pending a terms check. ITU
+  (SuccessFactors, API needs credentials) and the sources read as page HTML
+  (universities, research institutes, SRG SSR, small company sites) are not
+  collected.
+- **Why:** the "official feeds only, no page HTML" rule stays; Milestone 1
+  scope does not grow.
+- **Rejected:** relaxing the rule for public institutions with permissive
+  robots.txt (harder to defend once the repository is public).
+
+## 2026-11-03: Labelling page shows postings as a document
+- **What:** the labelling page rebuilds paragraphs, headings and bullet
+  lists from the stored plain text and the sentence offsets. Sentences stay
+  clickable spans, and their numbers show on hover or when marked. The old
+  view with one row per sentence stays available behind a key.
+- **Why:** the line view was hard to read. Sentence ids, the unit of
+  evidence shared with the extractors, don't change, so labels are unaffected.
+- **Rejected for now:** keeping the original HTML for real formatting. It
+  needs a new column and a re-collect, and it would change the text the test
+  set is built on (listed under README "Later").

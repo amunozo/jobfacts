@@ -11,7 +11,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from jobfacts import labels, locations
+from jobfacts import labels, locations, sentences
 from jobfacts.extract.posting import PostingText
 from jobfacts.extract.spec import FIELDS
 from jobfacts.label_app import prefill
@@ -46,6 +46,20 @@ def canton_spec() -> list[dict]:
         }
         for c in locations.CANTONS.values()
     ]
+
+
+def sentence_offsets(item: dict) -> list[list[int]] | None:
+    """[start, end] in `description_text` for each stored sentence, for the document view.
+
+    The text is split again with the same deterministic splitter; when the ids or texts do not
+    match the stored sentences (an older snapshot, a changed splitter), returns None and the page
+    falls back to the line view.
+    """
+    split = sentences.split(item.get("description_text") or "")
+    stored = [(s["id"], s["text"]) for s in item["sentences"]]
+    if [(s.id, s.text) for s in split] != stored:
+        return None
+    return [[s.start, s.end] for s in split]
 
 
 def create_app(
@@ -123,7 +137,9 @@ def create_app(
             "employer": it["employer"],
             "title": it["title"],
             "location_raw": it["location_raw"],
+            "description_text": it.get("description_text") or "",
             "sentences": it["sentences"],
+            "offsets": sentence_offsets(it),
             "mode": mode,
             "prefill": pre,
             "canton_hints": hints,

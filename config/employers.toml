@@ -443,6 +443,16 @@ ats = "ashby"
 board_id = "xbowcareers"
 
 [[employer]]
+name = "Exa"
+ats = "ashby"
+board_id = "exa"
+
+[[employer]]
+name = "Deepgram"
+ats = "ashby"
+board_id = "deepgram"
+
+[[employer]]
 name = "bexio"
 ats = "recruitee"
 board_id = "bexioag"

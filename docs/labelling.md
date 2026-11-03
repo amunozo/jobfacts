@@ -8,8 +8,27 @@ All data stays in `data/private/` (git-ignored). The examples below are made up.
 `DIR/labels.jsonl` instead (for trying the app on a copy); `--port` changes the port.
 
 The page (`static/`: `index.html`, `app.css`, `app.js`, plain files, no build step) shows
-the posting as numbered sentences on the left and the label form on the right. Press `?`
-in the page for the keyboard shortcuts.
+the posting on the left and the label form on the right. Press `?` in the page for the
+keyboard shortcuts.
+
+The posting has two views; `Shift+V` or the Document/Lines button above the title switches
+between them, and the page remembers the choice (browser storage, per browser):
+
+- **Document view** (default): the posting reads like a rendered note. Sentence numbers are
+  hidden, shown on hover and always shown for sentences marked as evidence, with the field
+  marks (`MODE`, `DE`, ...) as small badges after the sentence. The layout is rebuilt from the
+  plain text between sentences (the stored text has no HTML): a blank line starts a new
+  paragraph; a line starting with a bullet marker (`-`, `*`, `•`, `1.`, ..., or a line holding
+  only `-` followed by the item text) is a list item, and consecutive items form one list even
+  with blank lines between them; a short standalone line (one sentence, at most 10 words and 70
+  characters) without ending punctuation, or ending in `:` with at most 6 words, is a heading;
+  a plain line right after another plain line continues the paragraph after a line break.
+- **Line view**: one numbered row per sentence.
+
+Both views make one clickable element per sentence id, so clicking a sentence toggles it as
+evidence the same way. The title (`T`) and location (`L`) rows stay at the top in both.
+If the stored sentences do not match a fresh split of `description_text` (`offsets` is
+`null`), the page shows the line view for that posting.
 
 ## Files (all in `data/private/`)
 
@@ -62,7 +81,9 @@ List sorted by `order`. The language and group are shown on purpose.
 ```json
 {"posting_id": 1234, "order": 31, "language": "en", "group": "en_ai", "employer": "Acme AG",
  "title": "ML Engineer", "location_raw": "Zürich, Switzerland",
+ "description_text": "We work in a hybrid mode.",
  "sentences": [{"id": 1, "text": "We work in a hybrid mode."}],
+ "offsets": [[0, 25]],
  "mode": "prefilled",
  "prefill": {"fields": {"work_mode": {"value": "hybrid", "sentences": [1]}},
              "office_cantons": ["ZH"], "office_cantons_sentences": [-1],
@@ -74,7 +95,9 @@ List sorted by `order`. The language and group are shown on purpose.
  "fields": ["... same as /api/spec fields ..."],
  "label": null}
 ```
-`prefill` is `null` in blind mode or when no extraction exists; `prefill.fields`
+`offsets` holds `[start, end]` in `description_text` for each sentence (same order), from a
+fresh split with `jobfacts.sentences.split`; it is `null` when that split does not match the
+stored ids and texts. `prefill` is `null` in blind mode or when no extraction exists; `prefill.fields`
 omits fields without a majority; `office_cantons` / `office_cantons_sentences` /
 `office_places` are present only when at least two extractors agree on the canton set.
 `canton_hints` are the cantons code finds anywhere in the posting (whole register); 

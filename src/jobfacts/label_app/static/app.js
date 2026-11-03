@@ -242,22 +242,63 @@ function cueHtml(text, id, candRx) {
 
 // ---------------------------------------------------------------- posting pane
 
-function renderPosting() {
-  const it = S.item;
-  const pane = $("#posting");
+// The posting has two views. "doc" (default) rebuilds paragraphs, headings and lists from the
+// text between sentences; "lines" shows one numbered row per sentence. Both make one clickable
+// `.sent` element per sentence id, so evidence, marks and scrolling work the same way.
+const VIEW_KEY = "jobfacts.label.view";
+function loadView() {
+  try { return localStorage.getItem(VIEW_KEY) === "lines" ? "lines" : "doc"; } catch { return "doc"; }
+}
+function saveView(v) {
+  try { localStorage.setItem(VIEW_KEY, v); } catch { /* storage blocked: keep it for this page only */ }
+}
+S.view = loadView();
+const docAvailable = () => Boolean(S.item && Array.isArray(S.item.offsets));
+const currentView = () => (S.view === "doc" && docAvailable() ? "doc" : "lines");
+
+function toggleView() {
+  if (!S.item) return;
+  if (!docAvailable()) { toast("Document view is not available for this posting"); return; }
+  // Keep the reader's place: the first sentence visible now is scrolled back into view.
+  let anchor = null;
+  for (const [id, el] of S.sentEls) {
+    if (id > 0 && el.offsetParent && el.getBoundingClientRect().top >= 56) { anchor = id; break; }
+  }
+  S.view = S.view === "doc" ? "lines" : "doc";
+  saveView(S.view);
+  renderPosting();
+  updateMarks();
+  const el = anchor !== null && S.sentEls.get(anchor);
+  if (el && el.offsetParent) el.scrollIntoView({ block: "start" });
+  window.scrollBy(0, -70);
+}
+
+function candidateRx(it) {
   const matched = [...new Set(Object.values(it.place_candidates || {}).flat().map((c) => c.matched).filter(Boolean))]
     .sort((a, b) => b.length - a.length)
     .map((m) => m.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
-  const candRx = matched.length ? rx(matched.join("|")) : null;
-  const rows = [
+  return matched.length ? rx(matched.join("|")) : null;
+}
+
+function renderPosting() {
+  const it = S.item;
+  const pane = $("#posting");
+  const candRx = candidateRx(it);
+  const view = currentView();
+  const inner = document.createElement("div");
+  inner.className = `posting-inner view-${view}`;
+  const toggleTitle = docAvailable() ? "Switch view (Shift+V)" : "Document view is not available for this posting";
+  inner.innerHTML = `<div class="employer"><span>${esc(it.employer)} · posting ${it.posting_id}</span>
+    <span class="view-toggle" role="group" aria-label="View" title="${toggleTitle}">
+      <button type="button" data-view="doc" class="${view === "doc" ? "on" : ""}"${docAvailable() ? "" : " disabled"}>Document</button>
+      <button type="button" data-view="lines" class="${view === "lines" ? "on" : ""}">Lines</button>
+    </span></div>`;
+  S.sentEls = new Map();
+  const meta = [
     { id: TITLE_ID, text: it.title, cls: "meta title" },
     { id: LOCATION_ID, text: it.location_raw || "", cls: "meta loc meta-last" },
-    ...it.sentences.map((s) => ({ id: s.id, text: s.text, cls: "" })),
   ];
-  const inner = document.createElement("div");
-  inner.className = "posting-inner";
-  inner.innerHTML = `<div class="employer">${esc(it.employer)} · posting ${it.posting_id}</div>`;
-  S.sentEls = new Map();
+  const rows = view === "lines" ? [...meta, ...it.sentences.map((s) => ({ id: s.id, text: s.text, cls: "" }))] : meta;
   for (const r of rows) {
     const el = document.createElement("div");
     el.className = "sent " + r.cls;
@@ -272,14 +313,142 @@ function renderPosting() {
       inner.append(sep);
     }
   }
+  if (view === "doc") inner.append(renderDoc(it, candRx));
   pane.replaceChildren(inner);
+}
+
+// ---------------------------------------------------------------- document view
+
+const MARKER_RX = /^(?:[-*+•·▪◦‣–—]|\d{1,2}[.)])$/;        // a bullet marker on its own
+const LEAD_MARKER_RX = /^\s*(?:([-*+•·▪◦‣–—])|(\d{1,2})[.)])\s/; // marker at the start of a line
+const NEWLINE_RX = /\r\n|[\n\r\u2028\u2029]/;
+
+// Group the sentences into source lines. `head` is the text on the line before the first
+// sentence (a bullet marker or nothing), `blank` says a blank line came before the line.
+function sourceLines(text, sents) {
+  const lines = [];
+  let pos = 0;
+  let cur = null;
+  for (const s of sents) {
+    const parts = text.slice(pos, s.start).split(NEWLINE_RX);
+    pos = s.end;
+    if (cur && parts.length === 1) { cur.sents.push(s); continue; }
+    const middle = cur ? parts.slice(1, -1) : parts.slice(0, -1);
+    cur = {
+      sents: [s],
+      head: parts[parts.length - 1],
+      blank: middle.some((p) => !p.trim()) || lines.length === 0,
+    };
+    lines.push(cur);
+  }
+  return lines;
+}
+
+// One block per heading, list or paragraph. Rules:
+//   - a line that starts with a bullet marker (or follows a line holding only a marker) is a
+//     list item; consecutive items form one list, even with blank lines between them;
+//   - a short standalone line without ending punctuation is a heading;
+//   - other lines are paragraphs; a line right after another paragraph line (no blank line)
+//     continues that paragraph after a line break.
+function docBlocks(text, sents) {
+  const lines = sourceLines(text, sents);
+  const blocks = [];
+  let carry = null; // a "-" sentence alone on its line: the next line is its list item
+  for (const ln of lines) {
+    if (ln.sents.length === 1 && MARKER_RX.test(ln.sents[0].text.trim())) {
+      carry = { sent: ln.sents[0], blank: ln.blank || (carry ? carry.blank : false),
+                ordered: /\d/.test(ln.sents[0].text) };
+      continue;
+    }
+    const lead = ln.head.match(LEAD_MARKER_RX);
+    const hidden = carry ? [carry.sent] : [];
+    const blank = ln.blank || Boolean(carry && carry.blank);
+    let kind;
+    let ordered = false;
+    if (carry || lead) {
+      kind = "li";
+      ordered = carry ? carry.ordered : Boolean(lead[2]);
+    } else if (isHeading(ln.sents)) {
+      kind = "h";
+    } else {
+      kind = "p";
+    }
+    carry = null;
+    const last = blocks[blocks.length - 1];
+    if (kind === "li") {
+      const item = { hidden, sents: ln.sents };
+      if (last && last.kind === "list" && last.ordered === ordered) last.items.push(item);
+      else blocks.push({ kind: "list", ordered, items: [item] });
+    } else if (kind === "p" && last && last.kind === "p" && !blank) {
+      last.lines.push(ln.sents);
+    } else if (kind === "p") {
+      blocks.push({ kind: "p", lines: [ln.sents] });
+    } else {
+      blocks.push({ kind: "h", sents: ln.sents });
+    }
+  }
+  if (carry) blocks.push({ kind: "p", lines: [[carry.sent]] });
+  return blocks;
+}
+
+function isHeading(sents) {
+  if (sents.length !== 1) return false;
+  const t = sents[0].text.trim();
+  if (t.length > 70 || !/\p{L}/u.test(t) || /^#\S+$/.test(t)) return false; // not "#Hashtag"
+  const words = t.split(/\s+/).length;
+  if (words > 10) return false;
+  if (/:["'”’)\]]*$/.test(t)) return words <= 6;
+  return !/[.!?…;,]["'”’)\]]*$/.test(t);
+}
+
+function renderDoc(it, candRx) {
+  const text = it.description_text;
+  const sents = it.sentences.map((s, i) => ({ id: s.id, text: s.text, start: it.offsets[i][0], end: it.offsets[i][1] }));
+  const doc = document.createElement("article");
+  doc.className = "doc";
+  const sentEl = (s, hidden = false) => {
+    const el = document.createElement("span");
+    el.className = "sent ds" + (hidden ? " marker-only" : "");
+    el.dataset.id = s.id;
+    el.innerHTML = `<sup class="dnum">${s.id}</sup><span class="txt">${cueHtml(s.text, s.id, candRx)}</span><span class="marks"></span>`;
+    S.sentEls.set(s.id, el);
+    return el;
+  };
+  const fill = (parent, list) => list.forEach((s, i) => {
+    if (i) parent.append(" ");
+    parent.append(sentEl(s));
+  });
+  for (const b of docBlocks(text, sents)) {
+    if (b.kind === "h") {
+      const h = document.createElement("h3");
+      fill(h, b.sents);
+      doc.append(h);
+    } else if (b.kind === "p") {
+      const p = document.createElement("p");
+      b.lines.forEach((line, i) => {
+        if (i) p.append(document.createElement("br"));
+        fill(p, line);
+      });
+      doc.append(p);
+    } else {
+      const list = document.createElement(b.ordered ? "ol" : "ul");
+      for (const item of b.items) {
+        const li = document.createElement("li");
+        for (const s of item.hidden) li.append(sentEl(s, true));
+        fill(li, item.sents);
+        list.append(li);
+      }
+      doc.append(list);
+    }
+  }
+  return doc;
 }
 
 function updateMarks() {
   const act = activeName();
   document.body.dataset.active = act;
   for (const [id, el] of S.sentEls) {
-    el.classList.remove("ev-set", "ev-sugg", "ev-hover");
+    el.classList.remove("ev-set", "ev-sugg", "ev-hover", "marked");
     const marks = [];
     for (const name of ORDER) {
       if (name === "relevant") continue;
@@ -291,6 +460,7 @@ function updateMarks() {
       marks.push(`<span class="mark${sugg ? " sugg" : ""}${name === act ? " active" : ""}" data-field="${name}" title="${LABEL[name]}${sugg ? " (suggested)" : ""}">${ABBR[name]}</span>`);
     }
     el.querySelector(".marks").innerHTML = marks.join("");
+    if (marks.length) el.classList.add("marked");
   }
 }
 
@@ -307,6 +477,12 @@ function inView(el) {
 }
 
 function onSentenceClick(ev) {
+  const viewBtn = ev.target.closest("[data-view]");
+  if (viewBtn) {
+    viewBtn.blur();
+    if (!viewBtn.disabled && viewBtn.dataset.view !== currentView()) toggleView();
+    return;
+  }
   const markEl = ev.target.closest(".mark");
   if (markEl) { setActive(ORDER.indexOf(markEl.dataset.field)); return; }
   const el = ev.target.closest(".sent");
@@ -947,6 +1123,7 @@ function onKey(ev) {
     case "k": case "K": case "ArrowUp": ev.preventDefault(); setActive(S.active - 1); break;
     case "Enter": ev.preventDefault(); confirmActive(); break;
     case "A": if (ev.shiftKey) { ev.preventDefault(); confirmAll(); } break;
+    case "V": if (ev.shiftKey) { ev.preventDefault(); toggleView(); } break;
     case "[": ev.preventDefault(); step(-1); break;
     case "]": ev.preventDefault(); step(1); break;
     case "u": case "U": {

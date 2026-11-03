@@ -114,7 +114,19 @@ kbd {
 /* posting */
 .posting { padding: 22px 28px 120px 20px; }
 .posting-inner { max-width: 78ch; margin: 0 auto; }
-.employer { color: var(--muted); font-size: 13px; margin: 0 0 10px 52px; }
+.employer {
+  display: flex; justify-content: space-between; align-items: center; gap: 12px;
+  color: var(--muted); font-size: 13px; margin: 0 0 10px 52px;
+}
+.view-toggle { display: inline-flex; border: 1px solid var(--line-strong); border-radius: 6px; overflow: hidden; flex: none; }
+.view-toggle button {
+  font: inherit; font-size: 12px; color: var(--muted); background: transparent;
+  border: 0; padding: 2px 9px; cursor: pointer;
+}
+.view-toggle button + button { border-left: 1px solid var(--line-strong); }
+.view-toggle button:hover:not(:disabled) { background: var(--hover-bg); color: var(--text); }
+.view-toggle button.on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.view-toggle button:disabled { opacity: 0.45; cursor: not-allowed; }
 .sent {
   position: relative;
   display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; gap: 0 10px;
@@ -136,6 +148,58 @@ kbd {
 .sent.loc .txt { color: var(--muted); }
 .sent.meta-last { margin-bottom: 14px; padding-bottom: 6px; }
 .sep { height: 1px; background: var(--line); margin: 8px 0 12px 44px; }
+
+/* document view: reading layout (like a rendered note); each sentence is an inline span */
+.doc {
+  margin: 0 0 0 44px; max-width: 70ch;
+  font-size: 16px; line-height: 1.7; color: var(--text);
+}
+.doc p { margin: 0 0 0.95em; }
+.doc h3 {
+  font-size: 1.08em; font-weight: 680; line-height: 1.4; letter-spacing: 0.005em;
+  margin: 1.5em 0 0.45em;
+}
+.doc > h3:first-child { margin-top: 0.4em; }
+.doc ul, .doc ol { margin: 0 0 0.95em; padding-left: 1.5em; }
+.doc li { margin: 0.2em 0; padding-left: 0.2em; }
+.doc ul > li::marker { color: var(--faint); }
+.doc ol > li::marker { color: var(--muted); font-variant-numeric: tabular-nums; }
+.sent.ds {
+  display: inline; position: relative;
+  border-left: 0; font-size: inherit; line-height: inherit;
+  border-radius: 3px; padding: 1px 0;
+  -webkit-box-decoration-break: clone; box-decoration-break: clone;
+  cursor: pointer; transition: background-color 0.1s;
+}
+.sent.ds .txt { overflow-wrap: anywhere; }
+.sent.ds .dnum {
+  display: none; user-select: none;
+  font: 600 9.5px/1 ui-monospace, SFMono-Regular, Menlo, monospace; font-variant-numeric: tabular-nums;
+  color: var(--faint); margin-right: 2px; vertical-align: 0.55em;
+}
+/* hover: number floats as a small tag just above the start of the sentence, without moving
+   the text */
+.sent.ds:hover .dnum {
+  display: inline; position: absolute; z-index: 2; transform: translate(-40%, -1.05em);
+  color: var(--muted); background: var(--panel); border: 1px solid var(--line-strong);
+  border-radius: 3px; padding: 1px 3px;
+}
+/* sentences marked as evidence for any field: number and marks always shown, inline */
+.sent.ds.marked .dnum, .sent.ds.marked:hover .dnum {
+  display: inline; position: static; transform: none; background: none; border: 0; padding: 0;
+  color: var(--muted);
+}
+.sent.ds .marks { display: inline-flex; gap: 2px; padding: 0; margin-left: 3px; vertical-align: 0.12em; }
+.sent.ds .marks:empty { display: none; }
+.sent.ds .mark { font-size: 9px; padding: 2px 4px; }
+.sent.ds:hover { background: var(--hover-bg); }
+.sent.ds.marker-only { display: none; }
+.sent.ds.marker-only.marked { display: inline; margin-right: 4px; }
+.sent.ds.ev-set { background: var(--accent-soft); box-shadow: inset 0 -2px 0 var(--accent); border-left: 0; }
+.sent.ds.ev-sugg { background: var(--sugg-soft); box-shadow: inset 0 -2px 0 var(--sugg); border-left: 0; }
+.sent.ds.ev-hover { outline: 1.5px solid var(--accent); outline-offset: 0; }
+.sent.ds.flash { animation: flash-inline 0.9s ease-out; }
+@keyframes flash-inline { from { outline: 2px solid var(--accent); } to { outline: 2px solid transparent; } }
 
 /* evidence for the active field */
 .sent.ev-set { background: var(--accent-soft); border-left-color: var(--accent); }
