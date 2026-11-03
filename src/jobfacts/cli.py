@@ -1,6 +1,7 @@
 """Command line: `jobfacts migrate` and `jobfacts collect`."""
 
 import argparse
+import sys
 from pathlib import Path
 
 from jobfacts import db
@@ -13,7 +14,6 @@ def _csv(value: str | None) -> list[str]:
 
 def _search(conn, args) -> int:
     import json
-    import sys
 
     from jobfacts import search
 
@@ -34,6 +34,12 @@ def _search(conn, args) -> int:
         new_days=args.new_days,
         limit=args.limit,
     )
+    stale = search.stale_relevance_count(conn)
+    if stale:
+        print(
+            f"warning: {stale} relevance rows are from an older version; run `jobfacts relevance`",
+            file=sys.stderr,
+        )
     try:
         hits, total = search.search(conn, filters, evidence=args.evidence)
     except search.SearchError as error:
@@ -351,12 +357,18 @@ def main(argv: list[str] | None = None) -> int:
                         key=args.run_key or args.extractor,
                         force=args.force,
                         limit=args.limit,
+                        record_partial=args.run_key is not None,
                     )
                 except FileExistsError as e:
                     print(e)
                     return 2
+                except FileNotFoundError as e:
+                    print(f"error: {e}", file=sys.stderr)
+                    return 2
                 failed = sum(1 for x in results if x.error)
                 cost = sum(x.cost_usd for x in results)
+                if args.limit and args.run_key is None:
+                    print("partial run (--limit) not recorded; pass --run-key to record it")
                 print(
                     f"holdout run {run_id}: {len(results)} postings, {failed} errors, ${cost:.4f}"
                 )

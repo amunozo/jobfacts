@@ -175,3 +175,24 @@ def test_run_holdout_records_run_and_refuses_repeat(hold_dir, monkeypatch):
         holdout.run_holdout(None, object(), hold_dir, key="jev")
     holdout.run_holdout(None, object(), hold_dir, key="jev", force=True)
     assert len(calls) == 2
+
+
+def test_partial_holdout_run_is_not_recorded_without_explicit_key(hold_dir, monkeypatch):
+    monkeypatch.setattr(holdout, "run_extraction", lambda *a, **k: (7, []))
+    holdout.run_holdout(None, object(), hold_dir, key="jev", limit=2)
+    assert not (hold_dir / "holdout_runs.json").exists()
+    holdout.run_holdout(None, object(), hold_dir, key="trial", limit=2, record_partial=True)
+    assert json.loads((hold_dir / "holdout_runs.json").read_text()) == {"trial": 7}
+
+
+def test_cli_missing_holdout_file_is_a_clean_error(tmp_path, monkeypatch, capsys):
+    import contextlib
+
+    from jobfacts import cli, db
+
+    monkeypatch.setattr(db, "connect", lambda: contextlib.nullcontext(object()))
+    monkeypatch.setattr("jobfacts.extract.run.make_extractor", lambda name: object())
+    code = cli.main(
+        ["extract", "--extractor", "jev", "--set", "holdout", "--data-dir", str(tmp_path)]
+    )
+    assert code == 2 and "select-holdout" in capsys.readouterr().err

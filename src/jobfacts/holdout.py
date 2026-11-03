@@ -23,11 +23,13 @@ def run_holdout(
     key: str,
     force: bool = False,
     limit: int | None = None,
+    record_partial: bool = False,
 ):
     """Extract every held-out posting with `extractor`; store the run id under `key`.
 
     Raises FileExistsError if the key already has a run (unless `force`) so that paid runs are
-    not repeated by accident."""
+    not repeated by accident. A run cut short by `limit` is recorded only if `record_partial`
+    (an explicit run key), so a trial never takes the place of the real run."""
     data_dir = Path(data_dir)
     path = data_dir / HOLDOUT_FILE.name
     if not path.exists():
@@ -38,6 +40,8 @@ def run_holdout(
         raise FileExistsError(f"{RUNS_FILE} already has run {runs[key]} for {key!r}; use --force")
     ids = [i["posting_id"] for i in load_test_set(path)]
     run_id, results = run_extraction(conn, extractor, ids, limit, notes=f"holdout set: {key}")
+    if limit and not record_partial:
+        return run_id, results
     runs[key] = run_id
     runs_file.write_text(json.dumps(runs) + "\n", encoding="utf-8")
     return run_id, results

@@ -49,3 +49,4 @@ class BoardRead:
     seen_ids: set[str] = field(default_factory=set)
     notes: str = ""
     close_missing: bool = True  # False when the list is known to be incomplete
+    close_ids: set[str] = field(default_factory=set)  # verified gone one by one (capped lists)

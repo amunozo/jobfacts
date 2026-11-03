@@ -72,6 +72,16 @@ def open_count(conn: psycopg.Connection, employer_id: int) -> int:
     ).fetchone()[0]
 
 
+def known_urls(conn: psycopg.Connection, employer_id: int) -> dict[str, str]:
+    """Open postings of an employer with their URL, least recently seen first."""
+    rows = conn.execute(
+        "SELECT source_job_id, url FROM postings WHERE employer_id = %s AND closed_at IS NULL "
+        "ORDER BY last_seen_at, id",
+        (employer_id,),
+    )
+    return {job_id: url for job_id, url in rows}
+
+
 def known_versions(conn: psycopg.Connection, employer_id: int) -> dict[str, str | None]:
     """Open postings of an employer with their stored source version (for incremental reads)."""
     rows = conn.execute(
@@ -89,7 +99,9 @@ def rekey_source_ids(conn: psycopg.Connection, employer_id: int, key) -> int:
     Idempotent. A row whose new id is already taken by another row is left alone.
     """
     rows = conn.execute(
-        "SELECT id, source_job_id FROM postings WHERE employer_id = %s", (employer_id,)
+        "SELECT id, source_job_id FROM postings WHERE employer_id = %s "
+        "ORDER BY (closed_at IS NOT NULL), last_seen_at DESC, id",  # open first, then freshest
+        (employer_id,),
     ).fetchall()
     taken = {job_id for _, job_id in rows}
     changed = 0
@@ -110,6 +122,7 @@ def record_success(
     postings: list[Posting],
     seen_ids: frozenset[str] | set[str] = frozenset(),
     close_missing: bool = True,
+    close_ids: frozenset[str] | set[str] = frozenset(),
 ) -> Counts:
     """Store a successful read in one transaction: insert, update, reopen, close the missing.
 
@@ -186,6 +199,13 @@ def record_success(
                 (employer_id, keep),
             )
             counts.closed = closed.rowcount
+        if close_ids:  # postings the collector verified one by one to be gone
+            closed = conn.execute(
+                "UPDATE postings SET closed_at = now() WHERE employer_id = %s "
+                "AND closed_at IS NULL AND source_job_id = ANY(%s)",
+                (employer_id, list(close_ids)),
+            )
+            counts.closed += closed.rowcount
         conn.execute(
             "INSERT INTO board_reads (run_id, employer_id, ok, postings_seen) "
             "VALUES (%s, %s, true, %s)",

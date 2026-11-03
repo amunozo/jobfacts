@@ -257,3 +257,29 @@ def test_jev_spec_version_covers_inputs(monkeypatch):
             m.setattr(jev, name, value)
             assert jev.JevExtractor(FakeJev()).spec_version() != base, name
     assert jev.JevExtractor(FakeJev()).spec_version() == base
+
+
+@pytest.mark.db
+def test_load_relevance_uses_only_the_current_version(conn):
+    from jobfacts.extract import jev
+    from jobfacts.extract import store as xstore
+
+    emp = conn.execute(
+        "INSERT INTO employers (name, ats, board_id) VALUES ('E','greenhouse','e') RETURNING id"
+    ).fetchone()[0]
+    pids = [
+        conn.execute(
+            "INSERT INTO postings (employer_id, source_job_id, url, title, content_hash) "
+            "VALUES (%s,%s,'u','t','h') RETURNING id",
+            (emp, str(i)),
+        ).fetchone()[0]
+        for i in range(2)
+    ]
+    xstore.save_relevance(conn, pids[0], jev.MODEL, 0.9, 0.4, jev.relevance_version())
+    xstore.save_relevance(conn, pids[1], jev.MODEL, 0.9, 0.4, "old")
+    conn.commit()
+    assert ev.load_relevance(conn, pids, jev.MODEL) == {pids[0]: 0.9}
+    _, counts = ev.score_records(
+        [item(p) for p in pids], {p: label(p, relevant="true") for p in pids}, {}, {pids[0]: 0.9}
+    )
+    assert counts["unscored"] == 1

@@ -9,6 +9,9 @@ Rules this module enforces:
 - at most one request per second per host, shared by all threads (`RateLimiter`).
 - incremental: a posting page is fetched only if it is new or its sitemap `lastmod` changed.
 - only pages whose URL location segment looks Swiss or remote are fetched (`url_is_candidate`).
+- a capped sitemap cannot show what closed, so stored open postings missing from it get their
+  own page requested (same robots check and rate limit, at most `MAX_GONE_CHECKS` per run) and
+  are closed only on a clear "gone" answer (see `page_status`).
 """
 
 import json
@@ -35,6 +38,7 @@ _PAGE_ACCEPT = "text/html,application/xhtml+xml"
 # Workday sitemaps of big tenants list only 100 postings (seen on Novartis: 100 of ~850 jobs).
 SITEMAP_CAP = 100
 _REMOTE_SUFFIX = " / Remote"
+MAX_GONE_CHECKS = 200  # own-page checks per employer per run
 
 
 class RateLimiter:
@@ -200,6 +204,47 @@ def parse_posting(html_text: str, url: str, version: str | None = None) -> Posti
     )
 
 
+_EMPTY_OG_TITLE = re.compile(r'<meta[^>]*property="og:title"(?![^>]*content="[^"]+")[^>]*>')
+
+
+def page_status(client, robots, url: str) -> str:
+    """Is the posting page still there? One of `open`, `gone`, `gone_shell`, `unknown`, `stop`.
+
+    `gone` only on a clear signal: HTTP 404/410, or a redirect away from the posting (Workday
+    sends removed jobs to the site's search/home page, so the final URL no longer has the
+    requisition id). A 200 page on the same URL counts as `open` if it has the JobPosting
+    JSON-LD; without it we cannot tell (JavaScript shell, maintenance page): `unknown`. Errors,
+    timeouts, 5xx and robots-disallowed URLs are `unknown`: never close on them. 403/429 means
+    the site asks us to stop (`stop`).
+    """
+    if not robots.can_fetch(USER_AGENT, url):
+        return "unknown"
+    try:
+        response = client.get(url, headers={"Accept": _PAGE_ACCEPT})
+    except httpx.HTTPError:
+        return "unknown"
+    code = response.status_code
+    if code in (404, 410):
+        return "gone"
+    if code in (403, 429):
+        return "stop"
+    wanted = job_id_from_url(url).lower()
+    if code in (301, 302, 303, 307, 308):  # client that does not follow redirects
+        target = response.headers.get("location", "").lower()
+        return "gone" if wanted and target and wanted not in target else "unknown"
+    if code != 200:
+        return "unknown"
+    if wanted and wanted not in str(response.url).lower():
+        return "gone"  # redirected to a generic page
+    if _json_ld_job(response.text) is not None:
+        return "open"
+    # Workday answers a removed (or unknown) job with 200 and the page shell: no JSON-LD and an
+    # EMPTY og:title (checked live on 3 Nov 2026; a live job has its title there).
+    if _EMPTY_OG_TITLE.search(response.text):
+        return "gone_shell"  # weaker signal than 404: see the outage guard in fetch()
+    return "unknown"
+
+
 def _drop_universal_remote(postings: list[Posting]) -> list[Posting]:
     """Some tenants mark every posting TELECOMMUTE (Disney, Logitech, Thomson Reuters ...).
 
@@ -222,8 +267,12 @@ def fetch(
     extra: dict,
     known: dict[str, str | None] | None = None,
     limiter: RateLimiter | None = None,
+    known_urls: dict[str, str] | None = None,
 ) -> BoardRead:
-    """Read one Workday site. `known` maps stored open job ids to their stored sitemap lastmod."""
+    """Read one Workday site. `known` maps stored open job ids to their stored sitemap lastmod.
+
+    `known_urls` (stored open job id -> URL, least recently seen first) lets a capped read check
+    the postings its sitemaps do not list, one page each, instead of closing nothing."""
     known = known or {}
     client = LimitedClient(client, limiter or DEFAULT_LIMITER)
     base = f"https://{board_id}.{extra['wd']}.myworkdayjobs.com"
@@ -259,7 +308,13 @@ def fetch(
         if len(listed) == SITEMAP_CAP:
             capped_sites.append(site)
         for url, lastmod in listed:
-            entries.setdefault(key_of(url), (url, lastmod))
+            key = key_of(url)
+            # Main site wins, but a Swiss/remote URL beats a non-candidate one: the same
+            # requisition may sit under a non-Swiss city on External and Zurich on Technology.
+            if key not in entries or (
+                prefilter and not url_is_candidate(entries[key][0]) and url_is_candidate(url)
+            ):
+                entries[key] = (url, lastmod)
 
     seen: set[str] = set()
     to_fetch = []
@@ -293,6 +348,33 @@ def fetch(
     stats["fetched"] = len(to_fetch) - sum(
         n for reason, n in failures.items() if reason.startswith("stopped")
     )
+    close_ids: set[str] = set()
+    gone_note = ""
+    if capped_sites and known_urls:
+        absent = [(i, known_urls[i]) for i in known_urls if i not in seen][:MAX_GONE_CHECKS]
+        checked = 0
+        shell_ids: set[str] = set()
+        for job_id, url in absent:
+            status = page_status(client, robots, url)
+            if status == "stop":
+                break
+            checked += 1
+            if status == "gone":
+                close_ids.add(job_id)
+            elif status == "gone_shell":
+                shell_ids.add(job_id)
+            elif status == "open":
+                seen.add(job_id)  # still online, only outside the capped list
+        if checked >= 5 and len(shell_ids) == checked:
+            # Every page is an empty shell: more likely an outage or a changed page than a mass
+            # removal. 404/410 and redirects are trusted; only the shell signal is held back.
+            gone_note = f"; checked {checked}, all empty shells: closed none (suspicious)"
+        else:
+            close_ids |= shell_ids
+            gone_note = (
+                f"; checked {checked} postings missing from the capped list, "
+                f"closed {len(close_ids)}"
+            )
     notes = (
         f"sitemap {stats['sitemap']}, prefilter kept {stats['kept_by_prefilter']} / skipped "
         f"{stats['skipped_by_prefilter']}, unchanged {stats['unchanged']}, "
@@ -304,11 +386,19 @@ def fetch(
     if capped_sites:
         notes += (
             f"; capped or unread sitemap ({', '.join(capped_sites)}; cap is {SITEMAP_CAP}), "
-            "so nothing is closed"
+            "so the list alone closes nothing"
         )
+        notes += gone_note
     if failures:
         notes += " (" + "; ".join(f"{r} x{n}" for r, n in failures.items()) + ")"
-    return BoardRead(postings=postings, seen_ids=seen, notes=notes, close_missing=not capped_sites)
+    return BoardRead(
+        postings=postings,
+        seen_ids=seen,
+        notes=notes,
+        close_missing=not capped_sites,
+        close_ids=close_ids,
+    )
 
 
 fetch.incremental = True
+fetch.checks_gone = True  # run.py passes `known_urls`

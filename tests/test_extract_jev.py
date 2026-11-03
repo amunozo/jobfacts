@@ -118,7 +118,7 @@ def test_rules_run_after_the_model():
         "v_remote_from_switzerland": "allowed",
     }
     r = jev.JevExtractor(FakeJev(pick, noul=0.0, noul_pick={"c_GE": 0.9})).extract(posting())
-    assert r.values["title_level"] == "not_stated"  # "Senior ML Engineer" has no staff word
+    assert r.values["title_level"] == "senior"  # no staff word: falls back to the title level
     assert r.sentences["title_level"] == []
     assert r.values["remote_from_switzerland"] == "not_applicable"
     assert r.office_cantons == [] and r.sentences["office_cantons"] == []

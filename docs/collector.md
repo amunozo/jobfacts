@@ -85,5 +85,14 @@ requested; a disallowed sitemap fails the read), then `/<site>/siteMap.xml`, the
   closed, because a posting missing from one site may still be on the other. A posting that
   disappears from an uncapped extra site therefore stays open while the main site is capped
   (Julius Baer today), a conservative choice: stale open postings rather than wrongly closed.
+- Capped employers (any site at 100 URLs, or an unread extra site): the lists alone close
+  nothing, so each stored open posting absent from every sitemap read this run gets its own
+  page requested (robots.txt check, same 1 request/second limit, sequential, at most 200 per
+  employer per run, least recently seen first). It is closed only on a clear "gone" answer: HTTP
+  404/410, or a redirect away from the posting URL (Workday sends removed jobs to the site
+  page). A 200 page with JobPosting JSON-LD keeps it open (and refreshes `last_seen_at`); a
+  200 page without it, errors, timeouts, 5xx and robots-disallowed URLs change nothing; a
+  403/429 ends the checks. The run notes say "checked N postings missing from the capped list,
+  closed M".
 - "Remote" is added for `jobLocationType = TELECOMMUTE`, unless nearly every posting of the
   employer has it (several tenants flag everything).

@@ -50,11 +50,26 @@ def collect(
         if getattr(fetchers[e[2]], "incremental", False)
     }
 
+    # Fetchers that verify postings missing from a capped list get the stored URLs too.
+    urls = {
+        e[0]: store.known_urls(conn, e[0])
+        for e in employers
+        if getattr(fetchers[e[2]], "checks_gone", False)
+    }
+
     def read(employer):
         employer_id, _, ats, board_id, extra = employer
         try:
             with make_client() as client:
-                if employer_id in known:
+                if employer_id in urls:
+                    result = fetchers[ats](
+                        client,
+                        board_id,
+                        extra or {},
+                        known[employer_id],
+                        known_urls=urls[employer_id],
+                    )
+                elif employer_id in known:
                     result = fetchers[ats](client, board_id, extra or {}, known[employer_id])
                 else:
                     result = fetchers[ats](client, board_id, extra or {})
@@ -82,6 +97,7 @@ def collect(
                     result.postings,
                     result.seen_ids,
                     result.close_missing,
+                    result.close_ids,
                 )
                 if result.notes:
                     summary.notes.append((name, result.notes))

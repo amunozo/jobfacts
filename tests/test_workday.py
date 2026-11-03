@@ -501,3 +501,198 @@ def test_existing_suffixed_rows_are_rekeyed_not_duplicated(conn, tmp_path):
     assert seen[0] == {"r-17167": "v1", "r-5": "v1"}
     assert [(r[0], r[1]) for r in after] == [(before[0][0], "r-17167"), (before[1][0], "r-5")]
     assert all(r[2] is None for r in after)
+
+
+# --- capped lists: stored postings missing from them get their own page checked ---------------
+
+
+class GoneSite(Site):
+    """Capped sitemap; own-page answers: 404, redirect to the site home, 200 page, 500."""
+
+    def handler(self, request):
+        url = str(request.url)
+        if url.endswith("/siteMap.xml") or url.endswith("/robots.txt"):
+            return super().handler(request)
+        self.requests.append(url)
+        answer = self.pages.get(url)
+        if isinstance(answer, int):
+            return httpx.Response(answer, text="")
+        if isinstance(answer, str) and answer.startswith("->"):
+            return httpx.Response(302, headers={"location": answer[2:]})
+        return httpx.Response(200, text=answer or "")
+
+
+def capped_entries():
+    return [(u("Bern", f"Role_R-{i}"), None) for i in range(workday.SITEMAP_CAP)]
+
+
+def test_capped_read_closes_only_postings_whose_page_is_clearly_gone():
+    listed = {f"R-{i}": None for i in range(workday.SITEMAP_CAP)}
+    urls = {
+        "R-404": u("Bern", "A_R-404"),
+        "R-redir": u("Bern", "B_R-redir"),
+        "R-open": u("Bern", "C_R-open"),
+        "R-500": u("Bern", "D_R-500"),
+        "R-shell": u("Bern", "E_R-shell"),
+        "R-1": u("Bern", "Role_R-1"),  # listed: never checked
+    }
+    pages = {
+        urls["R-404"]: 404,
+        urls["R-redir"]: f"->{SITE}/",
+        urls["R-open"]: page(),
+        urls["R-500"]: 500,
+        urls["R-shell"]: "<html>loading</html>",
+    }
+    site = GoneSite(capped_entries(), pages)
+    read = workday.fetch(
+        site.client(), "acme", EXTRA, {**listed, **{k: None for k in urls}}, limiter(), urls
+    )
+    assert read.close_missing is False
+    assert read.close_ids == {"R-404", "R-redir"}
+    assert "R-open" in read.seen_ids and "R-500" not in read.seen_ids
+    assert "checked 5 postings" in read.notes and "closed 2" in read.notes
+    assert urls["R-1"] not in site.requests
+
+
+def test_gone_checks_respect_robots_cap_and_stop_signal():
+    robots = "User-agent: *\nDisallow: /Careers/job/Bern/Hidden_R-h\nAllow: /Careers/\n"
+    urls = {"R-h": u("Bern", "Hidden_R-h")}
+    site = GoneSite(capped_entries(), {}, robots=robots)
+    read = workday.fetch(site.client(), "acme", EXTRA, {"R-h": None}, limiter(), urls)
+    assert read.close_ids == set() and urls["R-h"] not in site.requests
+    # 429 ends the checks and closes nothing
+    urls = {f"X-{i}": u("Bern", f"X_X-{i}") for i in range(5)}
+    pages = {urls["X-0"]: 429, urls["X-1"]: 404}
+    site = GoneSite(capped_entries(), pages)
+    read = workday.fetch(site.client(), "acme", EXTRA, dict.fromkeys(urls), limiter(), urls)
+    assert read.close_ids == set() and urls["X-1"] not in site.requests
+    # the per-run cap
+    many = {f"Y-{i}": u("Bern", f"Y_Y-{i}") for i in range(workday.MAX_GONE_CHECKS + 20)}
+    site = GoneSite(capped_entries(), dict.fromkeys(many.values(), 404))
+    read = workday.fetch(site.client(), "acme", EXTRA, dict.fromkeys(many), limiter(), many)
+    assert len(read.close_ids) == workday.MAX_GONE_CHECKS
+
+
+def test_uncapped_read_makes_no_page_checks():
+    site = GoneSite([(u("Bern", "A_R-1"), None)], {})
+    urls = {"R-2": u("Bern", "B_R-2")}
+    read = workday.fetch(site.client(), "acme", EXTRA, {"R-1": None, "R-2": None}, limiter(), urls)
+    assert read.close_ids == set() and read.close_missing is True
+    assert urls["R-2"] not in site.requests
+
+
+def test_close_ids_close_postings_in_the_database(conn, tmp_path):
+    reads = [
+        BoardRead([posting("R-1"), posting("R-2")], {"R-1", "R-2"}),
+        BoardRead([], {"R-1"}, close_missing=False, close_ids={"R-2"}),
+    ]
+    run_with(conn, tmp_path, reads)
+    s2, _ = run_with(conn, tmp_path, reads)
+    assert (s2.counts.closed, closed(conn, "R-1"), closed(conn, "R-2")) == (1, False, True)
+
+
+def test_collect_passes_stored_urls_to_fetchers_that_check_gone(conn, tmp_path):
+    path = tmp_path / "e.toml"
+    path.write_text(
+        '[[employer]]\nname="Acme"\nats="workday"\nboard_id="acme"\nwd="wd3"\nsite="Careers"\n'
+    )
+    got = []
+
+    def fake(client, board_id, extra, known, known_urls=None):
+        got.append(known_urls)
+        return BoardRead([posting("R-1")], {"R-1"})
+
+    fake.incremental = True
+    fake.checks_gone = True
+    collect(conn, fetchers={"workday": fake}, employers_file=path)
+    collect(conn, fetchers={"workday": fake}, employers_file=path)
+    assert got == [{}, {"R-1": f"{SITE}/job/Bern/X_R-1"}]
+
+
+# --- merging by requisition keeps the Swiss URL ---------------------------------------------
+
+
+def test_merge_prefers_the_swiss_url_over_a_non_swiss_main_url():
+    main = u("London", "Data-Scientist_r-17167-2")
+    tech = tu("Data-Scientist_r-17167-4")  # Bern in the Tech helper
+    site = TwoSites([(main, None)], [(tech, None)], {tech: page("Data Scientist")})
+    read = workday.fetch(site.client(), "acme", MERGE, None, limiter())
+    assert [(p.source_job_id, p.url) for p in read.postings] == [("r-17167", tech)]
+    assert main not in site.requests
+
+
+# --- re-keying is deterministic ----------------------------------------------------------------
+
+
+def test_rekey_prefers_open_then_most_recently_seen(conn):
+    from jobfacts.collect import store
+
+    emp = conn.execute(
+        "INSERT INTO employers (name, ats, board_id) VALUES ('E','workday','e') RETURNING id"
+    ).fetchone()[0]
+    for job_id, closed_at, seen in [
+        ("r-1-1", "now()", "now()"),  # closed, seen most recently
+        ("r-1-2", "NULL", "now() - interval '2 days'"),  # open
+        ("r-2-1", "now()", "now() - interval '3 days'"),
+        ("r-2-3", "now()", "now() - interval '1 day'"),  # both closed: the fresher wins
+    ]:
+        conn.execute(
+            "INSERT INTO postings (employer_id, source_job_id, url, title, content_hash, "
+            f"closed_at, last_seen_at) VALUES (%s,%s,'u','t','h',{closed_at},{seen})",
+            (emp, job_id),
+        )
+    conn.commit()
+    store.rekey_source_ids(conn, emp, workday.requisition_key)
+    rows = dict(conn.execute("SELECT source_job_id, url FROM postings").fetchall())
+    ids = {r[0] for r in conn.execute("SELECT source_job_id FROM postings")}
+    assert "r-1" in ids and "r-2" in ids and rows
+    winner = conn.execute(
+        "SELECT closed_at IS NULL FROM postings WHERE source_job_id = 'r-1'"
+    ).fetchone()[0]
+    assert winner is True
+    fresher = conn.execute("SELECT 1 FROM postings WHERE source_job_id='r-2-1'").fetchone()
+    assert fresher is not None  # the older closed row kept its old key
+
+
+def test_page_status_follows_a_redirect_to_a_generic_page():
+    gone, home = u("Bern", "A_R-7"), f"{SITE}/"
+
+    def handler(request):
+        if str(request.url) == gone:
+            return httpx.Response(302, headers={"location": home})
+        return httpx.Response(200, text="<html>search</html>")
+
+    client = httpx.Client(transport=httpx.MockTransport(handler), follow_redirects=True)
+    lim = workday.LimitedClient(client, limiter())
+    robots = workday.RobotFileParser()
+    robots.parse([])
+    assert workday.page_status(lim, robots, gone) == "gone"
+
+
+def _status_of(text: str) -> str:
+    url = u("Bern", "A_R-8")
+    client = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200, text=text)))
+    robots = workday.RobotFileParser()
+    robots.parse([])
+    return workday.page_status(workday.LimitedClient(client, limiter()), robots, url)
+
+
+def test_page_status_reads_an_empty_og_title_shell_as_gone():
+    # Live Workday (3 Nov 2026): an unknown job is a 200 shell with an empty og:title.
+    shell = '<html><meta name="title" property="og:title"><meta property="og:description"></html>'
+    assert _status_of(shell) == "gone_shell"
+    titled = '<html><meta name="title" property="og:title" content="Data Scientist"></html>'
+    assert _status_of(titled) == "unknown"  # titled page without JSON-LD: cannot tell
+    assert _status_of("<html>loading</html>") == "unknown"
+
+
+def test_capped_read_closes_nothing_when_every_checked_page_is_an_empty_shell():
+    listed = {f"R-{i}": None for i in range(workday.SITEMAP_CAP)}
+    urls = {f"R-x{i}": u("Bern", f"X_R-x{i}") for i in range(6)}
+    shell = '<html><meta name="title" property="og:title"></html>'
+    site = GoneSite(capped_entries(), {url: shell for url in urls.values()})
+    read = workday.fetch(
+        site.client(), "acme", EXTRA, {**listed, **{k: None for k in urls}}, limiter(), urls
+    )
+    assert read.close_ids == set()
+    assert "suspicious" in read.notes

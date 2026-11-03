@@ -157,7 +157,19 @@ Decided cases (owner, 2026-11-03, title level): a level in brackets counts
 `not_stated` (provisional, owner unsure). Code rule: `title_level` is kept only
 if the title contains a keyword for that level (multilingual list in
 `extract/rules.py`; "Manager" only as a rank), otherwise `not_stated`;
-`seniority` is recomputed from the corrected level.
+`seniority` is recomputed from the corrected level. The list covers feminine and
+plural forms and both apostrophes (Praktikantin, apprenti(e), Absolvent(in),
+Jeune diplômé(e), Lernende/r, Bachelor-/Master-/Diplomarbeit, Leitung, Leitender,
+Leiterin, Directrice, Direktorin, Chef(fe) d'équipe; Projektleiter(in)/-leitung stay
+`not_stated`). When the keyword check vetoes the model's level, the level the title
+itself names is used instead (one level: that one; an internship word wins; a range or
+alternatives give the lower end; otherwise the highest), else `not_stated`
+("Senior Data Science Manager" with model `staff_principal` → `senior`).
+Title exclusions for relevance (`title_excluded`): sales, recruiting, talent, technician,
+customer success, insights, billing, payroll and partnerships titles are dropped unless the
+title also names a technical job (engineer, scientist, ML, AI ...); role names such as
+Sales Engineer, Customer Success Engineer, Sales Executive, Solutions Sales, Talent
+(Acquisition) Partner and Designer are always dropped.
 
 Decided cases (years, 2026-11-03): `0` only when the posting says no experience
 at all is needed; waiving only some experience ("no prior AI experience

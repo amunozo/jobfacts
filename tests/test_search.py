@@ -416,3 +416,12 @@ def test_location_raw_in_hit_and_json(conn, seed):
     assert hits[0].as_dict()["location_raw"] == "Zurich, CH"
     hits, _ = search.search(conn, Filters(), evidence=True)
     assert hits[0].as_dict()["location_raw"] == "Zurich, CH"
+
+
+@pytest.mark.db
+def test_stale_relevance_count(conn, seed):
+    pid = seed.add()  # saved without a spec version: counts as old
+    assert search.stale_relevance_count(conn) == 1
+    store.save_relevance(conn, pid, jev.MODEL, 0.9, 0.4, jev.relevance_version())
+    conn.commit()
+    assert search.stale_relevance_count(conn) == 0

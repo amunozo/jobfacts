@@ -92,6 +92,14 @@ JOIN LATERAL (
 """
 
 
+def stale_relevance_count(conn) -> int:
+    """Relevance rows of Jev not made with the current relevance version."""
+    return conn.execute(
+        "SELECT count(*) FROM relevance WHERE model = %s AND spec_version IS DISTINCT FROM %s",
+        (jev.MODEL, jev.relevance_version()),
+    ).fetchone()[0]
+
+
 def _language_values(maximum: str, show_unclear: bool) -> list[str]:
     values = list(LANGUAGE_MAX[maximum])
     if show_unclear or maximum == "fluent":

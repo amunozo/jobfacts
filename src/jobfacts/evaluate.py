@@ -20,6 +20,7 @@ import psycopg
 from jobfacts import labels as labels_mod
 from jobfacts import ordertest
 from jobfacts.extract.jev import RELEVANCE_THRESHOLD as _JEV_THRESHOLD
+from jobfacts.extract.jev import relevance_version
 from jobfacts.extract.spec import FIELDS, derive_seniority
 from jobfacts.label_app import prefill
 from jobfacts.stats import wilson
@@ -103,7 +104,7 @@ def score_records(
     (extractor, field -> labelled postings without any extraction row).
     """
     records: list[dict] = []
-    counts: dict = {"unsure": 0, "null": 0, "missing": Counter(), "labelled": 0}
+    counts: dict = {"unsure": 0, "null": 0, "missing": Counter(), "labelled": 0, "unscored": 0}
     for item in items:
         pid = item["posting_id"]
         label = labels.get(pid)
@@ -120,7 +121,9 @@ def score_records(
             counts["unsure"] += 1
         elif label["relevant"] is None:
             counts["null"] += 1
-        elif pid in relevance:
+        elif pid not in relevance:
+            counts["unscored"] += 1  # no relevance score of the current version
+        else:
             ok = (relevance[pid] >= RELEVANCE_THRESHOLD) == (label["relevant"] == "true")
             records.append(
                 {
@@ -359,10 +362,15 @@ def load_run(conn: psycopg.Connection, run_id: int) -> dict[int, dict]:
     return out
 
 
-def load_relevance(conn: psycopg.Connection, ids: list[int], model: str) -> dict[int, float]:
+def load_relevance(
+    conn: psycopg.Connection, ids: list[int], model: str, version: str | None = None
+) -> dict[int, float]:
+    """Relevance probabilities made with the current relevance spec version only (rules, prompt
+    and threshold as today); postings with only an older score count as unscored."""
     rows = conn.execute(
-        "SELECT posting_id, probability FROM relevance WHERE model = %s AND posting_id = ANY(%s)",
-        (model, ids),
+        "SELECT posting_id, probability FROM relevance "
+        "WHERE model = %s AND spec_version = %s AND posting_id = ANY(%s)",
+        (model, version or relevance_version(), ids),
     )
     return {pid: p for pid, p in rows}
 
@@ -421,6 +429,11 @@ def section_accuracy(records, items, extractors, counts) -> str:
                 + [cell(*summarize(records, extractor=e, field=field, group=g)[:2]) for g in groups]
             )
         lines.append(table(["extractor", *groups], rows))
+    if counts["unscored"]:
+        lines.append(
+            f"Labelled postings without a relevance score of the current version (unscored, "
+            f"not counted in `relevant`): {counts['unscored']}. Run `jobfacts relevance`.\n"
+        )
     missing = counts["missing"]
     if missing:
         lines.append(
