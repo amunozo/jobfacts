@@ -129,6 +129,35 @@ def test_workable():
     assert p.description_text == "Ship AI."
 
 
+def test_workable_merges_one_entry_per_location():
+    """The widget API repeats a job once per location; keep one posting with all locations."""
+
+    def entry(shortcode, city, country):
+        return {
+            "shortcode": shortcode,
+            "title": f"Role {shortcode}",
+            "url": f"https://apply.workable.com/j/{shortcode}",
+            "city": city,
+            "country": country,
+            "locations": [{"city": city, "country": country}],
+            "description": "<p>Text.</p>",
+        }
+
+    data = {
+        "jobs": [
+            entry("A1", "Barcelona", "Spain"),
+            entry("B2", "Bern", "Switzerland"),
+            entry("A1", "Zürich", "Switzerland"),
+            entry("A1", "Barcelona", "Spain"),
+            entry("A1", "València", "Spain"),
+        ]
+    }
+    postings = workable.parse(data, "acme")
+    assert [p.source_job_id for p in postings] == ["A1", "B2"]
+    assert postings[0].location_raw == "Barcelona, Spain / Zürich, Switzerland / València, Spain"
+    assert postings[1].location_raw == "Bern, Switzerland"
+
+
 def test_smartrecruiters():
     item = {
         "id": "744",
