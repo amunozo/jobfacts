@@ -111,7 +111,9 @@ The evaluation is the core of the project, not an extra.
 ## Milestones
 
 **Milestone 1 (about two weeks): collection and the first facts.**
-- Collector for the main job-board APIs, writing to PostgreSQL once a day.
+- Collector for the main job-board APIs, writing to PostgreSQL once a day
+  (`uv run jobfacts daily` runs the whole daily update: database, migrate,
+  collect, relevance, extraction for search).
 - Relevance filter for AI and data roles.
 - Extraction of three fields: work mode and remote eligibility, language
   requirement, seniority. Each with a quote.

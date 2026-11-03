@@ -2,6 +2,7 @@
 
 ```
 uv run jobfacts extract --extractor jev --for-search   # after each collect: only new/changed postings
+# or: uv run jobfacts daily   # database, migrate, collect, relevance and this extract in one go
 uv run jobfacts search [QUERY] [filters]
 ```
 

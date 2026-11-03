@@ -14,7 +14,13 @@ uv sync
 uv run jobfacts migrate       # applies migrations/*.sql in order
 uv run jobfacts collect       # reads all boards (about 1.5 minutes)
 uv run jobfacts collect --only Proton   # one employer or one ATS name
+uv run jobfacts daily         # the whole daily update, see below
 ```
+
+`daily` starts the database if needed (`docker compose up -d`), then runs migrate, collect,
+relevance and `extract --extractor jev --for-search` in order, stops at the first failing step
+(named in the message) and prints one summary line. `--skip-collect` reruns only the
+relevance and extraction steps. It works from any directory: `uv run --directory <repo> jobfacts daily`.
 
 The database URL comes from `DATABASE_URL`
 (default `postgresql://jobfacts:jobfacts@localhost:5433/jobfacts`).

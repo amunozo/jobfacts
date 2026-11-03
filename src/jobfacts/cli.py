@@ -143,6 +143,10 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="jobfacts")
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("migrate", help="apply database migrations")
+    day = sub.add_parser(
+        "daily", help="database up, migrate, collect, relevance, Jev extraction for search"
+    )
+    day.add_argument("--skip-collect", action="store_true", help="skip the collect step")
     col = sub.add_parser("collect", help="read all employer boards and store postings")
     col.add_argument("--only", help="only this employer name or ATS name (for testing)")
     sub.add_parser("relevance", help="score all open postings with the Jev relevance filter")
@@ -231,6 +235,10 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "silver":
         return _silver(args)
+    if args.command == "daily":
+        from jobfacts.daily import run_daily
+
+        return run_daily(skip_collect=args.skip_collect)
 
     with db.connect() as conn:
         if args.command == "migrate":
