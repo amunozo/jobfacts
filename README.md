@@ -129,6 +129,9 @@ The evaluation is the core of the project, not an extra.
 - Search by meaning (pgvector) next to keyword search.
 - FastAPI service and a simple web page. The API is designed to be called
   by other programs too, first the owner's private job-search tools.
+- The web page's look is inspired by SBB: their design tokens and icons
+  (openly licensed) in plain HTML and CSS, a free font instead of SBB's, no
+  SBB logo or brand marks (see `docs/decisions.md`).
 - GitHub Actions with the accuracy gate; Docker; deployment on one cloud
   provider; monitoring.
 - Load test with a stated result (response time at a given request rate).

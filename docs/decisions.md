@@ -292,3 +292,38 @@ Newest at the bottom.
 - **Rejected:** DeepSeek (no clear accuracy gain for 3x the cost); a mix
   per field (best numbers, but two extractors to run and maintain);
   Mistral (clearly worse: ~80% on German postings).
+
+## 2026-11-03: Page look inspired by SBB, built only from openly licensed parts
+- **What:** web pages take their style from the SBB design system (clean
+  Swiss layout, one red accent, strict grid) but use a free font. Allowed
+  as-is: Lyne components (MIT), Lyne design tokens (ISC), SBB icons and
+  pictograms (Apache-2.0), keeping their licence notices. Not used: the SBB
+  font (served from SBB's CDN with no licence), the SBB logo, the station
+  clock, or any icon that shows SBB's own brand marks.
+  Applies to the Milestone 2 search page (the labelling page stays as it
+  is). Plain HTML and CSS with the tokens and icons; Lyne components not
+  used.
+- **Why:** the repository may become public; a page that looks like an SBB
+  product could read as an official SBB tool, and code licences do not
+  grant trademark rights (Apache-2.0 section 6 says so explicitly).
+- **Rejected:** the full SBB look (font and brand not licensed for others);
+  Lyne components (more polished, but add a JavaScript dependency and are
+  harder to explain than plain HTML and CSS); restyling the labelling page
+  now (not in the current milestone).
+
+## 2026-11-03: Connect to the owner's job_watch as an extra source
+- **What:** the owner's `job_watch.py` (a separate private tool) calls
+  `jobfacts search "" --json` in this folder as a subprocess and treats the
+  results as one more source. Both sources stay on; each output row says who
+  found it (watch / jobfacts / both), and a comparison section lists what
+  only one of them found and what jobfacts' filters dropped. job_watch
+  applies the filters itself (German fluent and fixed-term dropped; location
+  by job_watch's own region rules) so the comparison is fair.
+- **Why:** jobfacts covers only the employer job-board APIs; job_watch also
+  covers career sites, Swiss boards and aggregators, and owns the "seen"
+  ledger and the applied-roles filter. Running both for a week measures
+  whether jobfacts finds the same roles and filters them better (the
+  Milestone 1 test). No jobfacts code moves into that tool.
+- **Rejected:** replacing job_watch's board polling now (loses the
+  comparison); copying jobfacts code into the vault; filtering German and
+  location inside jobfacts (only-watch rows would look like misses).
