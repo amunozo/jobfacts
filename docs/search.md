@@ -9,14 +9,14 @@ uv run jobfacts search [QUERY] [filters]
 ## What is searched
 
 Open board postings (`closed_at IS NULL`, `origin = 'board'`) that the relevance filter
-kept, using each posting's latest successful Jev extraction (latest run per posting).
+kept, using each posting's latest successful Jev extraction from a search run whose `content_hash` equals the posting's current one (latest run first).
 Application postings, closed postings and postings without a successful extraction never appear.
 
 `extract --for-search` starts a run marked `purpose = 'search'`. It skips postings that
 already have a successful search-run extraction for their current `content_hash`, so
 only new, changed or previously failed postings are read. It also redoes postings extracted
 under an older `spec_version` (changed extraction rules). When several extractions exist,
-search shows the latest one, preferring search runs over experiment runs.
+search shows the latest one. Experiment runs and extractions of an older text are never shown: a posting whose text changed disappears from search until `jobfacts daily` re-extracts it (an older spec version with the current text is still shown until then). Each hit also carries `location_raw`, the board's raw location text.
 
 ## Query
 

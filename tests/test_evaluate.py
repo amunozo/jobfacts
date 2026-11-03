@@ -241,3 +241,19 @@ def test_label_without_contract_type_is_unlabelled_not_a_crash():
     agreement = ev.evidence_agreement([item(1)], labels, exts)
     assert ("contract_type", "m") not in agreement
     assert ev.calibration([item(1)], labels, {1: ext(details={"contract_type": {"confidence": 1}})})
+
+
+def test_jev_spec_version_covers_inputs(monkeypatch):
+    base = jev.JevExtractor(FakeJev()).spec_version()
+    for name, value in [
+        ("MODEL", "jev-other"),
+        ("CANTON_THRESHOLD", 0.7),
+        ("EXTRACTION_CODE_VERSION", 2),
+        ("STATE_HEADER", "other header"),
+        ("SENTENCE_QUESTION", "other {question} {none}"),
+        ("OFFICE_EVIDENCE_SUFFIX", " other"),
+    ]:
+        with monkeypatch.context() as m:
+            m.setattr(jev, name, value)
+            assert jev.JevExtractor(FakeJev()).spec_version() != base, name
+    assert jev.JevExtractor(FakeJev()).spec_version() == base

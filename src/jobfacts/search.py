@@ -75,16 +75,19 @@ class Filters:
             raise SearchError("--limit must be at least 1")
 
 
-# The latest successful Jev extraction of each relevant, open board posting; extractions
-# from search runs win over experiment runs (a later experiment must not change the results).
+# The latest successful Jev extraction of each relevant, open board posting, counted only if
+# it comes from a search run and was made for the posting's current text (content_hash).
+# Experiment runs are never shown; postings without such an extraction are not shown until
+# `jobfacts daily` re-extracts them. An older spec version with the current text is shown.
 _BASE = """
 FROM postings p
 JOIN employers emp ON emp.id = p.employer_id
 JOIN relevance rel ON rel.posting_id = p.id AND rel.model = %(rel_model)s AND rel.relevant
 JOIN LATERAL (
     SELECT e.* FROM extractions e JOIN extraction_runs r ON r.id = e.run_id
-    WHERE e.posting_id = p.id AND r.extractor = 'jev' AND e.error IS NULL
-    ORDER BY (r.purpose = 'search') DESC, e.run_id DESC LIMIT 1
+    WHERE e.posting_id = p.id AND r.extractor = 'jev' AND r.purpose = 'search'
+      AND e.error IS NULL AND e.content_hash = p.content_hash
+    ORDER BY e.run_id DESC LIMIT 1
 ) x ON true
 """
 
@@ -141,10 +144,10 @@ def build(f: Filters, with_description: bool = False) -> tuple[str, dict]:
     columns = (
         "p.id, p.title, emp.name, p.url, p.first_seen_at, x.office_cantons, x.office_places, "
         "x.work_mode, x.remote_from_switzerland, x.german, x.french, x.seniority, x.contract_type, "
-        f"{rank} AS rank, count(*) OVER () AS total"
+        f"p.location_raw, {rank} AS rank, count(*) OVER () AS total"
     )
     if with_description:
-        columns += ", p.description_text, p.location_raw"
+        columns += ", p.description_text"
         columns += ", " + ", ".join(f"x.{n}_sentences AS {n}_sentences" for n in EVIDENCE_FIELDS)
     sql = f"SELECT {columns} {_BASE} WHERE {' AND '.join(where)} ORDER BY {order} LIMIT %(limit)s"
     return sql, params
@@ -166,6 +169,7 @@ class Hit:
     seniority: str
     contract_type: str | None
     rank: float
+    location_raw: str | None = None
     evidence: dict[str, list[str]] | None = None
 
     @property
@@ -192,6 +196,7 @@ class Hit:
             "seniority": self.seniority,
             "contract_type": self.contract_type,
             "rank": self.rank,
+            "location_raw": self.location_raw,
         }
         if self.evidence is not None:
             d["evidence"] = self.evidence
@@ -233,6 +238,7 @@ def search(conn: psycopg.Connection, f: Filters, evidence: bool = False) -> tupl
                 row["seniority"],
                 row["contract_type"],
                 float(row["rank"]),
+                row["location_raw"],
                 _evidence(row) if evidence else None,
             )
         )

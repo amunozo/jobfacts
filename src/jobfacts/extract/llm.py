@@ -17,7 +17,7 @@ from openai import OpenAI
 
 from jobfacts import locations
 from jobfacts.extract.base import Result
-from jobfacts.extract.jev import build_state
+from jobfacts.extract.jev import EXTRACTION_CODE_VERSION, STATE_HEADER, build_state
 from jobfacts.extract.posting import PostingText, parse_label
 from jobfacts.extract.spec import FIELDS, GENERAL_RULES, OFFICE_CANTONS, spec_hash
 
@@ -144,7 +144,9 @@ class LLMExtractor:
         self.extra_body = extra_body or {}
 
     def spec_version(self) -> str:
-        return spec_hash("llm:" + SYSTEM_TEMPLATE)
+        return spec_hash(
+            f"llm:{self.model}|{SYSTEM_TEMPLATE}|{STATE_HEADER}|code:{EXTRACTION_CODE_VERSION}"
+        )
 
     def _chat(self, messages: list[dict]) -> Any:
         return self.client.chat.completions.create(

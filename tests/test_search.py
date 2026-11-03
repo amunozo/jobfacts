@@ -96,7 +96,7 @@ class Seed:
             "RETURNING id"
         ).fetchone()[0]
         self.n = 0
-        self.run = store.create_run(conn, "jev", jev.MODEL, "v")
+        self.run = store.create_run(conn, "jev", jev.MODEL, "v", purpose="search")
 
     def add(
         self,
@@ -140,7 +140,7 @@ class Seed:
         )
         if error:
             r = Result(error=error)
-        store.save_extraction(self.conn, run or self.run, pid, r)
+        store.save_extraction(self.conn, run or self.run, pid, r, content_hash="h")
         return pid
 
 
@@ -168,7 +168,7 @@ def test_closed_application_irrelevant_and_unextracted_are_excluded(conn, seed):
 @pytest.mark.db
 def test_latest_successful_extraction_is_used(conn, seed):
     pid = seed.add(title="p", cantons=("ZH",))
-    run2 = store.create_run(conn, "jev", jev.MODEL, "v2")
+    run2 = store.create_run(conn, "jev", jev.MODEL, "v2", purpose="search")
     r = Result(
         values={
             "work_mode": "onsite",
@@ -181,12 +181,12 @@ def test_latest_successful_extraction_is_used(conn, seed):
         },
         office_cantons=["BE"],
     )
-    store.save_extraction(conn, run2, pid, r)
+    store.save_extraction(conn, run2, pid, r, "h")
     assert ids(conn, cantons=["BE"]) == {"p"}
     assert ids(conn, cantons=["ZH"]) == set()
     # a newer run that failed does not hide the older good one
-    run3 = store.create_run(conn, "jev", jev.MODEL, "v3")
-    store.save_extraction(conn, run3, pid, Result(error="boom"))
+    run3 = store.create_run(conn, "jev", jev.MODEL, "v3", purpose="search")
+    store.save_extraction(conn, run3, pid, Result(error="boom"), "h")
     assert ids(conn, cantons=["BE"]) == {"p"}
 
 
@@ -324,7 +324,7 @@ def test_incremental_extraction_skips_unchanged_and_application_postings(conn, s
         name, model = "jev", jev.MODEL
 
         def spec_version(self):
-            return "v"
+            return "fake1"
 
         def extract(self, p):
             return Result(
@@ -352,7 +352,7 @@ def test_incremental_extraction_skips_unchanged_and_application_postings(conn, s
     _, third = run_extraction(conn, Fake(), ids_, for_search=True)
     assert len(third) == 1
     # new extraction rules (spec version) redo everything
-    Fake.spec_version = lambda self: "v2"
+    Fake.spec_version = lambda self: "fake2"
     _, fourth = run_extraction(conn, Fake(), ids_, for_search=True)
     assert len(fourth) == 2
     _, fifth = run_extraction(conn, Fake(), ids_, for_search=True)
@@ -380,26 +380,39 @@ def test_contract_type_in_json_and_evidence(conn, seed):
 
 
 @pytest.mark.db
-def test_search_run_extraction_wins_over_newer_experiment_run(conn, seed):
+def test_experiment_runs_and_stale_content_are_never_shown(conn, seed):
     pid = seed.add(title="p", cantons=("ZH",))
-    conn.execute("UPDATE extraction_runs SET purpose = 'search'")
-    exp = store.create_run(conn, "jev", jev.MODEL, "v-exp")
-    store.save_extraction(
-        conn,
-        exp,
-        pid,
-        Result(
-            values={
-                "work_mode": "onsite",
-                "remote_from_switzerland": "not_applicable",
-                "german": "not_mentioned",
-                "french": "not_mentioned",
-                "min_years": "not_stated",
-                "title_level": "not_stated",
-                "contract_type": "not_stated",
-            },
-            office_cantons=["BE"],
-        ),
-    )
+    values = {
+        "work_mode": "onsite",
+        "remote_from_switzerland": "not_applicable",
+        "german": "not_mentioned",
+        "french": "not_mentioned",
+        "min_years": "not_stated",
+        "title_level": "not_stated",
+        "contract_type": "not_stated",
+    }
+    exp = store.create_run(conn, "jev", jev.MODEL, "v-exp")  # purpose = experiment
+    store.save_extraction(conn, exp, pid, Result(values=values, office_cantons=["BE"]), "h")
     assert ids(conn, cantons=["ZH"]) == {"p"}
     assert ids(conn, cantons=["BE"]) == set()
+    # an experiment-only posting is not shown at all
+    only_exp = seed.add(title="only-exp", run=exp)
+    assert "only-exp" not in ids(conn)
+    assert only_exp
+    # the text changed: the old facts are hidden until re-extraction
+    conn.execute("UPDATE postings SET content_hash = 'new' WHERE id = %s", (pid,))
+    assert "p" not in ids(conn)
+    run2 = store.create_run(conn, "jev", jev.MODEL, "v2", purpose="search")
+    store.save_extraction(conn, run2, pid, Result(values=values, office_cantons=["BE"]), "new")
+    assert ids(conn, cantons=["BE"]) == {"p"}
+
+
+@pytest.mark.db
+def test_location_raw_in_hit_and_json(conn, seed):
+    pid = seed.add(title="p")
+    conn.execute("UPDATE postings SET location_raw = 'Zurich, CH' WHERE id = %s", (pid,))
+    hits, _ = search.search(conn, Filters())
+    assert hits[0].location_raw == "Zurich, CH"
+    assert hits[0].as_dict()["location_raw"] == "Zurich, CH"
+    hits, _ = search.search(conn, Filters(), evidence=True)
+    assert hits[0].as_dict()["location_raw"] == "Zurich, CH"

@@ -37,6 +37,21 @@ CANTON_THRESHOLD = 0.5
 RELEVANCE_THRESHOLD = 0.5
 RELEVANCE_SENTENCES = 5
 
+# Bump when code that changes Jev's input or the stored output changes without changing any
+# constant below or in spec.py (sentence splitting, numbering, post-processing, places,
+# seniority). Code cannot be hashed reliably; this number is part of the spec version.
+EXTRACTION_CODE_VERSION = 1
+
+STATE_HEADER = (
+    "Job posting. Each line starts with an id: T = title, L = location field of the job "
+    "board, S001... = sentences of the description.\n\n"
+)
+SENTENCE_QUESTION = (
+    'Which line of the posting states the answer to: "{question}"? '
+    "Choose {none} if no line states it."
+)
+OFFICE_EVIDENCE_SUFFIX = " Choices are line ids."
+
 
 def make_client() -> TypeSafeClient:
     load_dotenv()  # reads TYPESAFE_API_KEY from .env (never printed)
@@ -49,10 +64,7 @@ def chunks(ids: list[int], size: int = MAX_OPTIONS - 1) -> list[list[int]]:
 
 
 def build_state(p: PostingText) -> str:
-    return (
-        "Job posting. Each line starts with an id: T = title, L = location field of the job "
-        "board, S001... = sentences of the description.\n\n" + p.numbered()
-    )
+    return STATE_HEADER + p.numbered()
 
 
 def build_questions(p: PostingText, ordering: str = "original") -> dict[str, Any]:
@@ -66,10 +78,7 @@ def build_questions(p: PostingText, ordering: str = "original") -> dict[str, Any
         )
         for k, part in enumerate(chunks(ids)):
             questions[f"s_{f.name}_{k}"] = Choice(
-                instructions=(
-                    f'Which line of the posting states the answer to: "{f.question}"? '
-                    f"Choose {NONE} if no line states it."
-                ),
+                instructions=SENTENCE_QUESTION.format(question=f.question, none=NONE),
                 criteria={**{label(i): None for i in part}, NONE: None},
             )
     for code in locations.CANTONS:
@@ -77,7 +86,7 @@ def build_questions(p: PostingText, ordering: str = "original") -> dict[str, Any
     questions["c_outside"] = Noul(instructions=OUTSIDE_QUESTION)
     for k, part in enumerate(chunks(ids)):
         questions[f"s_{OFFICE_CANTONS}_{k}"] = Choice(
-            instructions=f"{OFFICE_EVIDENCE_QUESTION} Choices are line ids.",
+            instructions=OFFICE_EVIDENCE_QUESTION + OFFICE_EVIDENCE_SUFFIX,
             criteria={**{label(i): None for i in part}, NONE: None},
         )
     return questions
@@ -111,7 +120,20 @@ class JevExtractor:
         self.ordering = ordering
 
     def spec_version(self) -> str:
-        extra = "jev:" + GENERAL_RULES
+        extra = "|".join(
+            [
+                "jev",
+                GENERAL_RULES,
+                MODEL,
+                f"threshold:{CANTON_THRESHOLD}",
+                f"none:{NONE}",
+                f"max_options:{MAX_OPTIONS}",
+                STATE_HEADER,
+                SENTENCE_QUESTION,
+                OFFICE_EVIDENCE_SUFFIX,
+                f"code:{EXTRACTION_CODE_VERSION}",
+            ]
+        )
         if self.ordering != "original":
             extra += f"|order:{self.ordering}"  # default hash stays unchanged
         return spec_hash(extra)
