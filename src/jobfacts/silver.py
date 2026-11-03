@@ -21,7 +21,7 @@ from jobfacts import locations
 from jobfacts.extract import llm
 from jobfacts.extract.posting import PostingText, label, parse_label
 from jobfacts.extract.spec import FIELDS, OFFICE_CANTONS
-from jobfacts.testset import TEST_SET_FILE, load_test_set
+from jobfacts.testset import HOLDOUT_FILE, TEST_SET_FILE, load_test_set
 
 ROOT = Path(__file__).resolve().parents[2]
 TEMPLATE = ROOT / "prompts" / "label_posting.md"
@@ -33,7 +33,7 @@ LABELLERS = {
     "opus": "claude-opus-5-5 (Claude Code subagent)",
 }
 RUNNABLE = ("gpt", "gemini", "gemini_or")
-SETS = ("pilot", "de", "all")
+SETS = ("pilot", "de", "all", "holdout")
 PILOT_FILE = "pilot.json"
 PILOT_PER_LANGUAGE = 4
 PILOT_LANGUAGES = ("en", "de", "fr")
@@ -80,9 +80,14 @@ def pilot_select(data_dir: Path) -> list[int]:
 
 
 def items_for(data_dir: Path, set_name: str = "pilot") -> list[dict]:
-    """Test-set items of an item set, sorted by `order`."""
+    """Items of an item set, sorted by `order` (`holdout` reads holdout_set.jsonl)."""
     if set_name not in SETS:
         raise ValueError(f"unknown set {set_name!r}; use one of {SETS}")
+    if set_name == "holdout":
+        path = Path(data_dir) / HOLDOUT_FILE.name
+        if not path.exists():
+            raise ValueError("no holdout set yet: run `jobfacts select-holdout`")
+        return sorted(load_test_set(path), key=lambda i: i["order"])
     items = load_test_set(Path(data_dir) / TEST_SET_FILE.name)
     if set_name == "de":
         items = [i for i in items if i["language"] == "de"]

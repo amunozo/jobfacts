@@ -6,6 +6,7 @@ Noul per canton plus one for "outside Switzerland", and one sentence Choice for 
 evidence. Probabilities and confidences are kept in `details`.
 """
 
+import hashlib
 import time
 from typing import Any
 
@@ -15,6 +16,7 @@ from typesafe_sdk import Choice, Noul, TypeSafeClient
 from jobfacts import locations
 from jobfacts.extract.base import Result
 from jobfacts.extract.posting import PostingText, label, parse_label
+from jobfacts.extract.rules import TITLE_RULES, apply_extraction_rules, title_excluded
 from jobfacts.extract.spec import (
     FIELDS,
     GENERAL_RULES,
@@ -34,13 +36,13 @@ PRICE_PER_MTOK_IN = 0.042
 MAX_OPTIONS = 255
 NONE = "none"
 CANTON_THRESHOLD = 0.5
-RELEVANCE_THRESHOLD = 0.5
+RELEVANCE_THRESHOLD = 0.4
 RELEVANCE_SENTENCES = 5
 
 # Bump when code that changes Jev's input or the stored output changes without changing any
 # constant below or in spec.py (sentence splitting, numbering, post-processing, places,
 # seniority). Code cannot be hashed reliably; this number is part of the spec version.
-EXTRACTION_CODE_VERSION = 1
+EXTRACTION_CODE_VERSION = 2  # 2: title/canton/remote rules (extract.rules)
 
 STATE_HEADER = (
     "Job posting. Each line starts with an id: T = title, L = location field of the job "
@@ -184,11 +186,28 @@ class JevExtractor:
             "sentence": sdetail,
         }
         result.details = details
+        apply_extraction_rules(p, result)
         return result
 
 
+def relevance_version() -> str:
+    """Version of everything that decides a relevance score; stored with each score, so a
+    change makes `jobfacts relevance` re-score all postings once."""
+    parts = [
+        RELEVANCE_QUESTION,
+        MODEL,
+        f"threshold:{RELEVANCE_THRESHOLD}",
+        f"sentences:{RELEVANCE_SENTENCES}",
+        TITLE_RULES,
+    ]
+    return hashlib.sha256("|".join(parts).encode()).hexdigest()[:12]
+
+
 def relevance_probability(client: Any, p: PostingText, model: str = MODEL) -> float:
-    """Probability that the role is AI / ML / data / research (title + first sentences)."""
+    """Probability that the role is AI / ML / data / research (title + first sentences).
+    A title on the exclusion list (rules.title_excluded) scores 0 without a model call."""
+    if title_excluded(p.title):
+        return 0.0
     head = "\n".join(s.text for s in p.sentences[:RELEVANCE_SENTENCES])
     state = f"Title: {p.title}\nLocation: {p.location_raw}\n\n{head}"
     response = client.system_one(

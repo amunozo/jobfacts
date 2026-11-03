@@ -22,14 +22,26 @@ Follow the field guide below exactly. The most important rules:
 - **Years of experience only when a number is stated.** A degree (MSc, PhD) is
   not converted into years. "PhD or 3 years of experience" gives 3. "MSc or PhD,
   or equivalent industry experience" gives `not_stated`. A range gives its
-  minimum.
+  minimum. `0` only when the posting says no experience at all is needed;
+  waiving only some experience ("no prior AI experience required") is
+  `not_stated`.
 - **`title_level` comes from the title line (T) only.** An apprenticeship
   (Lehrstelle, apprentissage) counts as `internship`.
+  A level in brackets counts ("(Senior) Consultant" is `senior`). "Partner" is
+  `staff_principal`. Member of Technical/Product Staff, Research Staff, Postdoc,
+  plain Researcher, Expert, Resident, "Experienced ..." and Group Product
+  Manager state no level: `not_stated`.
 - **Work mode needs a statement.** An office location with nothing said about
   home or remote working is `not_stated`, not `onsite`.
 - **Office cantons:** only places where this role works. Company history,
   customers, other sites mentioned in passing and travel do not count. The
   location line (L) counts.
+- **Remote regions:** a country or region where a remote worker may live
+  ("Remote - United States", "Remote (Europe)") is not an office. Office cities
+  of the home country next to "remote" ("Zürich / Remote") name no region:
+  `remote_from_switzerland` is `not_stated`. A named region ("Remote (Europe)")
+  wins over perk wording such as "work from anywhere": `unclear`. A Swiss office
+  or employer alone does not make it `allowed`.
 
 ## Field guide
 
@@ -41,13 +53,18 @@ Follow the field guide below exactly. The most important rules:
 
 ## Relevance
 
-`relevant` is `"true"` if the role is an AI, machine-learning, data-science,
-data-engineering or research role, a software-engineering or infrastructure role
-with real ML/AI components (including infrastructure for model training), a
-product role on an ML/AI product, or a role building AI evaluations; web-scraping
-/ data-acquisition and analytics-engineering roles count as data engineering.
-`"false"` if it is not; business-intelligence and reporting roles (dashboards,
-Power BI) are `"false"`. `"unsure"` only if the posting is too vague to tell.
+`relevant` is `"true"` if the main day-to-day work of the role itself is AI,
+machine learning, data science, data engineering (including analytics engineering
+and web scraping / data acquisition), SQL or statistical data analysis, or AI/ML
+or computational research; or software or infrastructure engineering on ML/AI
+systems (including model-training infrastructure); or product management of an
+ML/AI product; or solutions architecture or forward-deployed / deployed
+engineering on an AI product; or building AI evaluations. Judge the role's own
+tasks, not the employer's business: sales, account, customer-success, support,
+recruiting, marketing, design, operations, finance, billing, legal and
+data-centre roles are `"false"` even at an AI company. Business-intelligence,
+reporting, market-insight and revenue-planning analyst roles (dashboards, Power
+BI) are `"false"`. `"unsure"` only if the posting is too vague to tell.
 
 ## The posting
 

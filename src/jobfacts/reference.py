@@ -28,6 +28,19 @@ SHEET_FILE = "review_sheet.md"
 AUDIT_SEED = 20261103
 AUDIT_SIZE = 30
 KEYS = silver.KEYS
+HOLDOUT_REFERENCE_FILE = "reference_labels_holdout.jsonl"
+
+
+def _suffixed(name: str, set_name: str) -> str:
+    """File name for a set: the held-out set keeps its own reference, decisions and sheets."""
+    if set_name != "holdout":
+        return name
+    stem, dot, ext = name.rpartition(".")
+    return f"{stem}_holdout{dot}{ext}"
+
+
+def reference_file(set_name: str = "all") -> str:
+    return HOLDOUT_REFERENCE_FILE if set_name == "holdout" else REFERENCE_FILE
 
 
 def _cmp(answer: dict, key: str) -> Any:
@@ -78,9 +91,9 @@ def load_panel(data_dir: Path, pids: list[int]) -> tuple[dict[str, dict[int, dic
 # ----- review decisions -----------------------------------------------------------------
 
 
-def load_decisions(data_dir: Path) -> dict[tuple[int, str], dict]:
+def load_decisions(data_dir: Path, set_name: str = "all") -> dict[tuple[int, str], dict]:
     """Latest decision per (posting id, key)."""
-    path = _dir(data_dir) / DECISIONS_FILE
+    path = _dir(data_dir) / _suffixed(DECISIONS_FILE, set_name)
     out: dict[tuple[int, str], dict] = {}
     if path.exists():
         for line in path.read_text(encoding="utf-8").splitlines():
@@ -90,9 +103,9 @@ def load_decisions(data_dir: Path) -> dict[tuple[int, str], dict]:
     return out
 
 
-def load_issued(data_dir: Path) -> list[dict]:
+def load_issued(data_dir: Path, set_name: str = "all") -> list[dict]:
     """All review items handed out so far: item, posting_id, key, kind (split|audit), sheet."""
-    path = _dir(data_dir) / ISSUED_FILE
+    path = _dir(data_dir) / _suffixed(ISSUED_FILE, set_name)
     return json.loads(path.read_text(encoding="utf-8"))["items"] if path.exists() else []
 
 
@@ -221,7 +234,7 @@ def combine(data_dir: Path, set_name: str = "all") -> dict:
     data_dir = Path(data_dir)
     items = silver.items_for(data_dir, set_name)
     answers, missing = load_panel(data_dir, [i["posting_id"] for i in items])
-    decisions = load_decisions(data_dir)
+    decisions = load_decisions(data_dir, set_name)
     records = []
     for item in items:
         pid = item["posting_id"]
@@ -229,7 +242,7 @@ def combine(data_dir: Path, set_name: str = "all") -> dict:
             continue
         recs = {lab: answers[lab][pid] for lab in PANEL}
         records.append(combine_posting(item, recs, decisions))
-    out = data_dir / REFERENCE_FILE
+    out = data_dir / reference_file(set_name)
     out.parent.mkdir(parents=True, exist_ok=True)
     with out.open("w", encoding="utf-8") as f:
         for rec in records:
@@ -245,8 +258,8 @@ def combine(data_dir: Path, set_name: str = "all") -> dict:
     }
 
 
-def load_reference(data_dir: Path) -> dict[int, dict]:
-    path = Path(data_dir) / REFERENCE_FILE
+def load_reference(data_dir: Path, set_name: str = "all") -> dict[int, dict]:
+    path = Path(data_dir) / reference_file(set_name)
     out: dict[int, dict] = {}
     if path.exists():
         for line in path.read_text(encoding="utf-8").splitlines():
@@ -320,8 +333,8 @@ def review_sheet(data_dir: Path, set_name: str = "all", audit: int = AUDIT_SIZE)
     data_dir = Path(data_dir)
     items = {i["posting_id"]: i for i in silver.items_for(data_dir, set_name)}
     answers, _ = load_panel(data_dir, list(items))
-    decisions = load_decisions(data_dir)
-    issued = load_issued(data_dir)
+    decisions = load_decisions(data_dir, set_name)
+    issued = load_issued(data_dir, set_name)
     seen = {(i["posting_id"], i["key"]) for i in issued}
     sheet_no = max((i["sheet"] for i in issued), default=0) + 1
     next_no = max((i["item"] for i in issued), default=0) + 1
@@ -354,7 +367,7 @@ def review_sheet(data_dir: Path, set_name: str = "all", audit: int = AUDIT_SIZE)
             next_no += 1
     on_sheet = [i for i in issued if pending(i)] + new
     on_sheet.sort(key=lambda i: i["item"])
-    path = _dir(data_dir) / ISSUED_FILE
+    path = _dir(data_dir) / _suffixed(ISSUED_FILE, set_name)
     path.write_text(json.dumps({"items": issued + new}, indent=1) + "\n", encoding="utf-8")
     n_split = sum(i["kind"] == "split" for i in on_sheet)
     n_audit = len(on_sheet) - n_split
@@ -371,7 +384,7 @@ def review_sheet(data_dir: Path, set_name: str = "all", audit: int = AUDIT_SIZE)
         recs = {lab: answers[lab][entry["posting_id"]] for lab in PANEL}
         lines.append(render_item(entry["item"], entry["kind"], item, entry["key"], recs))
         lines.append("")
-    out = _dir(data_dir) / SHEET_FILE
+    out = _dir(data_dir) / _suffixed(SHEET_FILE, set_name)
     out.write_text("\n".join(lines), encoding="utf-8")
     return {"path": out, "splits": n_split, "audit": n_audit, "new": len(new),
             "incomplete": len(items) - len(complete)}  # fmt: skip
@@ -388,13 +401,13 @@ def parse_decisions(text: str) -> list[dict]:
     return [json.loads(line) for line in text.splitlines() if line.strip()]
 
 
-def review_apply(data_dir: Path, file: Path) -> dict:
+def review_apply(data_dir: Path, file: Path, set_name: str = "all") -> dict:
     """Validate a decisions file against the issued items and store the decisions.
 
     All or nothing: one bad line raises ValueError and nothing is stored. Later decisions for
     the same (posting, key) replace earlier ones when `combine` runs."""
     data_dir = Path(data_dir)
-    issued = {i["item"]: i for i in load_issued(data_dir)}
+    issued = {i["item"]: i for i in load_issued(data_dir, set_name)}
     out: list[dict] = []
     problems: list[str] = []
     for n, d in enumerate(parse_decisions(Path(file).read_text(encoding="utf-8")), 1):
@@ -432,7 +445,7 @@ def review_apply(data_dir: Path, file: Path) -> dict:
         out.append(rec)
     if problems:
         raise ValueError("; ".join(problems))
-    path = _dir(data_dir) / DECISIONS_FILE
+    path = _dir(data_dir) / _suffixed(DECISIONS_FILE, set_name)
     with path.open("a", encoding="utf-8") as f:
         for rec in out:
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
@@ -442,11 +455,11 @@ def review_apply(data_dir: Path, file: Path) -> dict:
 # ----- audit ----------------------------------------------------------------------------
 
 
-def audit_stats(data_dir: Path) -> dict:
+def audit_stats(data_dir: Path, set_name: str = "all") -> dict:
     """Audit result: per key and overall, [correct, audited] over decided audit items, and the
     number of split keys issued / decided."""
-    issued = load_issued(data_dir)
-    decisions = load_decisions(data_dir)
+    issued = load_issued(data_dir, set_name)
+    decisions = load_decisions(data_dir, set_name)
     per_key: dict[str, list[int]] = {}
     for entry in issued:
         d = decisions.get((entry["posting_id"], entry["key"]))

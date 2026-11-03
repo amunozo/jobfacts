@@ -665,6 +665,8 @@ ats = "workday"
 board_id = "juliusbaer"
 wd = "wd3"
 site = "External"
+# External lists only the newest 100; Technology (81) holds roles External misses.
+extra_sites = ["Technology"]
 
 [[employer]]
 name = "Novartis"

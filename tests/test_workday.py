@@ -3,6 +3,7 @@
 import json
 
 import httpx
+import pytest
 
 from jobfacts.collect.boards import workday
 from jobfacts.collect.posting import BoardRead
@@ -363,3 +364,140 @@ def test_remote_label_dropped_when_every_posting_has_it():
         "Remote"
         in workday.fetch(one.client(), "acme", EXTRA, None, limiter()).postings[0].location_raw
     )
+
+
+# --- extra sites: one posting per requisition across sites -------------------------------------
+
+TECH = f"{BASE}/Tech"
+MERGE = {**EXTRA, "extra_sites": ["Tech"]}
+
+
+class TwoSites(Site):
+    """Careers and Tech sitemaps; `tech` may be a status code for a failing extra site."""
+
+    def __init__(self, main, tech, pages, **kw):
+        super().__init__(main, pages, **kw)
+        self.tech = tech
+
+    def handler(self, request):
+        url = str(request.url)
+        if url.endswith("/Tech/siteMap.xml"):
+            self.requests.append(url)
+            if isinstance(self.tech, int):
+                return httpx.Response(self.tech, text="")
+            return httpx.Response(200, text=sitemap(self.tech))
+        return super().handler(request)
+
+
+def tu(slug):
+    return f"{TECH}/job/Bern/{slug}"
+
+
+def test_requisition_key_strips_only_the_site_suffix():
+    assert workday.requisition_key("r-17167-2") == "r-17167"
+    assert workday.requisition_key("R-0006447-1") == "R-0006447"
+    assert workday.requisition_key("r-19892") == "r-19892"
+    assert workday.requisition_key("R-0006447") == "R-0006447"
+
+
+def test_same_requisition_on_two_sites_is_one_posting_with_main_url():
+    main = u("Bern", "Data-Scientist_r-17167-2")
+    tech_dup, tech_only = tu("Data-Scientist_r-17167-4"), tu("Architect_r-18971-1")
+    site = TwoSites(
+        [(main, None)],
+        [(tech_dup, None), (tech_only, None)],
+        {main: page("Data Scientist"), tech_only: page("Architect")},
+    )
+    read = workday.fetch(site.client(), "acme", MERGE, None, limiter())
+    got = {p.source_job_id: (p.url, p.title) for p in read.postings}
+    assert got == {"r-17167": (main, "Data Scientist"), "r-18971": (tech_only, "Architect")}
+    assert read.seen_ids == {"r-17167", "r-18971"}
+    assert tech_dup not in site.requests  # the duplicate page is never fetched
+    assert read.close_missing is True
+
+
+def test_known_merged_id_is_not_refetched():
+    main = u("Bern", "X_r-1-2")
+    site = TwoSites([(main, None)], [(tu("X_r-1-4"), None)], {})
+    read = workday.fetch(site.client(), "acme", MERGE, {"r-1": None}, limiter())
+    assert read.postings == [] and read.seen_ids == {"r-1"}
+
+
+def test_any_capped_site_means_nothing_is_closed():
+    main = [(u("Bern", f"R_r-{i}-2"), None) for i in range(workday.SITEMAP_CAP)]
+    site = TwoSites(main, [(tu("Z_r-999-1"), None)], {})
+    read = workday.fetch(site.client(), "acme", MERGE, None, limiter())
+    assert read.close_missing is False and "Careers" in read.notes
+    # and the reverse: the extra site capped, main not
+    tech = [(tu(f"R_r-{i}-1"), None) for i in range(workday.SITEMAP_CAP)]
+    read = workday.fetch(
+        TwoSites([(u("Bern", "A_r-1-2"), None)], tech, {}).client(), "acme", MERGE, None, limiter()
+    )
+    assert read.close_missing is False
+
+
+def test_uncapped_sites_close_what_neither_lists():
+    site = TwoSites([(u("Bern", "A_r-1-2"), None)], [(tu("B_r-2-1"), None)], {})
+    assert workday.fetch(site.client(), "acme", MERGE, None, limiter()).close_missing is True
+
+
+def test_unreadable_extra_site_reads_the_rest_and_closes_nothing():
+    main = u("Bern", "A_r-1-2")
+    site = TwoSites([(main, None)], 500, {main: page("A")})
+    read = workday.fetch(site.client(), "acme", MERGE, None, limiter())
+    assert [p.source_job_id for p in read.postings] == ["r-1"]
+    assert read.close_missing is False and "Tech not read" in read.notes
+
+
+def test_extra_site_disallowed_by_robots_is_not_requested():
+    robots = "User-agent: *\nDisallow: /Tech/\nAllow: /Careers/\n"
+    main = u("Bern", "A_r-1-2")
+    site = TwoSites([(main, None)], [(tu("B_r-2-1"), None)], {main: page("A")}, robots=robots)
+    read = workday.fetch(site.client(), "acme", MERGE, None, limiter())
+    assert not any("/Tech/" in r for r in site.requests)
+    assert read.close_missing is False and read.seen_ids == {"r-1"}
+
+
+def test_without_extra_sites_ids_keep_their_suffix():
+    main = u("Bern", "A_r-1-2")
+    read = workday.fetch(
+        Site([(main, None)], {main: page()}).client(), "acme", EXTRA, None, limiter()
+    )
+    assert read.postings[0].source_job_id == "r-1-2"
+
+
+def test_main_site_failure_still_fails_the_read():
+    site = TwoSites([], [], {}, robots="User-agent: *\nDisallow: /Careers/\n")
+    with pytest.raises(PermissionError):
+        workday.fetch(site.client(), "acme", MERGE, None, limiter())
+
+
+# --- existing rows keep their row id when an employer starts merging ---------------------------
+
+
+def test_existing_suffixed_rows_are_rekeyed_not_duplicated(conn, tmp_path):
+    path = tmp_path / "e.toml"
+    head = '[[employer]]\nname="Acme"\nats="workday"\nboard_id="acme"\nwd="wd3"\nsite="Careers"\n'
+    path.write_text(head)  # before: no extra sites, ids keep the suffix
+
+    def fake(client, board_id, extra, known):
+        return BoardRead([posting("r-17167-2"), posting("r-5")], {"r-17167-2", "r-5"})
+
+    fake.incremental = True
+    collect(conn, fetchers={"workday": fake}, employers_file=path)
+    before = conn.execute("SELECT id, source_job_id FROM postings ORDER BY 2").fetchall()
+
+    path.write_text(head + 'extra_sites = ["Tech"]\n')
+    seen = []
+
+    def merged(client, board_id, extra, known):
+        seen.append(dict(known))
+        return BoardRead([], {"r-17167", "r-5", "r-18971"}, close_missing=False)
+
+    merged.incremental = True
+    collect(conn, fetchers={"workday": merged}, employers_file=path)
+    collect(conn, fetchers={"workday": merged}, employers_file=path)  # idempotent
+    after = conn.execute("SELECT id, source_job_id, closed_at FROM postings ORDER BY 2").fetchall()
+    assert seen[0] == {"r-17167": "v1", "r-5": "v1"}
+    assert [(r[0], r[1]) for r in after] == [(before[0][0], "r-17167"), (before[1][0], "r-5")]
+    assert all(r[2] is None for r in after)

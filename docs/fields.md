@@ -56,7 +56,9 @@ sentence(s); an empty one carries none. Accuracy is the exact match of the whole
 (main location metric), plus precision and recall per canton.
 
 Decided cases: a remote role that only lists countries where the person
-may live, with no office named, is an empty set. An ambiguous place name
+may live, with no office named, is an empty set. Code rule (2026-11-03): a canton the
+model picked is dropped unless the posting names a place in that canton
+(`PostingText.canton_hints()`); cantons are never added by code. An ambiguous place name
 (Reinach is in BL and AG) that nothing in the posting resolves gets both
 cantons.
 
@@ -79,6 +81,13 @@ for search; secondary metric only (it is as good as the cantons).
 
 Decided cases: a remote country list without Switzerland that includes
 "EMEA" → `unclear`; "choose where you live" → `unclear`.
+
+Decided cases (owner, 2026-11-03): "Remote (Europe)" plus "work from anywhere"
+in the perks → `unclear` (a named region wins over perk wording). Office cities
+of the home country next to "remote" ("Zürich / Remote", "Hamburg oder
+Nürnberg, oder remote") name no region → `not_stated`. A line that only says
+where a remote worker may live ("Remote - United States") is not an office.
+Code rule: if `work_mode` is not `remote`, the value is `not_applicable`.
 
 ## 2. Language requirement
 
@@ -139,6 +148,20 @@ Abteilung) and "Manager" as a rank (plain "Manager", "Manager, X",
 Account, Application, Project or Programmatic Advertising Manager),
 Projektleiter and Testleiter (roles, not ranks) → `not_stated`; "Postdoctoral Researcher" →
 `not_stated`; "Associate" as the lower end of a range → `junior`.
+
+Decided cases (owner, 2026-11-03, title level): a level in brackets counts
+("(Senior) Consultant" → `senior`, "(Junior-) Projektleiter" → `junior`);
+"Member of Technical Staff", "Member of Product Staff" and "Research Staff" →
+`not_stated` (job names, not staff level); "Partner" → `staff_principal`;
+"Expert", "Resident", "Experienced ..." and "Group Product Manager" →
+`not_stated` (provisional, owner unsure). Code rule: `title_level` is kept only
+if the title contains a keyword for that level (multilingual list in
+`extract/rules.py`; "Manager" only as a rank), otherwise `not_stated`;
+`seniority` is recomputed from the corrected level.
+
+Decided cases (years, 2026-11-03): `0` only when the posting says no experience
+at all is needed; waiving only some experience ("no prior AI experience
+required", "Erfahrung im Finanzsektor keine Voraussetzung") → `not_stated`.
 
 Decided cases (years): years listed as preferred or nice to have still count;
 separate requirements that all apply ("3+ years ML and 2+ years Python") take

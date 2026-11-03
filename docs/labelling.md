@@ -247,3 +247,49 @@ the reference and its audited error rate in the header, skips blind-vs-prefilled
 owner-only comparison), and adds a section comparing the reference with the owner's own
 labels per key. The silver report is written to `accuracy_silver_<date>.md`, the owner one to
 `accuracy_<date>.md`.
+
+## Held-out set
+
+The rules (field guide, relevance cut-offs, extraction prompts) were tuned while looking at the
+100-posting test set, so accuracy measured there is optimistic. The held-out set is 50 board
+postings that were never used for tuning, labelled by the same three-model majority, so that
+accuracy can be reported fairly. Everything is under `data/private/` (git-ignored).
+
+```
+uv run jobfacts select-holdout [--n 50] [--force]   # -> holdout_set.jsonl + holdout_set.meta.json
+uv run jobfacts silver render --set holdout          # prompts in silver/prompts/<id>.md
+uv run jobfacts silver run --labeller gpt --set holdout        # paid; same for gemini_or
+uv run jobfacts silver check --labeller opus --set holdout     # opus subagents write silver/raw/opus/<id>.json
+uv run jobfacts silver status|report --set holdout
+uv run jobfacts silver combine --set holdout         # -> reference_labels_holdout.jsonl
+uv run jobfacts silver review-sheet --set holdout    # -> silver/review_sheet_holdout.md
+uv run jobfacts silver review-apply FILE --set holdout
+uv run jobfacts extract --extractor jev --set holdout [--run-key K] [--force]  # paid
+uv run jobfacts evaluate --set holdout               # -> reports/accuracy_silver_holdout_<date>.md
+```
+
+Selection: open board postings that are extraction-eligible (Swiss location or remote wording),
+excluding every posting of `test_set.jsonl`, every posting the owner labelled, postings with the
+same employer and title as a test-set posting (other locations of the same job), and application
+postings. Target at 50: 25 en, 13 de, 12 fr. Per language the strata are `<lang>_borderline`
+(relevance score 0.3-0.6; 5 en, 3 de, 2 fr, so relevance is tested too), `<lang>_ai` (relevant:
+score at least 0.5, for German 0.35 as in the test set; at most 2 per employer, more only when the
+language runs short) and `<lang>_other` (low score; fills what `_ai` could not, mostly German
+and French, where few postings are relevant). Selection ignores extractor disagreement (the test
+set used it) and uses the fixed seed 20261104; the seed, strata counts and exclusion counts are
+in `holdout_set.meta.json`. The command refuses to overwrite an existing file without `--force`,
+because labels and runs refer to it. Selection runs on the database; everything after it reads
+files.
+
+Routing: `--set holdout` makes `silver` read `holdout_set.jsonl`. Raw answers keep the layout
+`silver/raw/<labeller>/<id>.json` and `silver/<labeller>/<id>.json` (posting ids do not collide,
+the sets are disjoint). The combined reference goes to `reference_labels_holdout.jsonl`; review
+items, decisions and the sheet have their own files (`review_items_holdout.json`,
+`review_decisions_holdout.jsonl`, `review_sheet_holdout.md`), so the audit estimate of the
+holdout reference is separate from the test set's. `extract --set holdout` stores the run id in
+`holdout_runs.json` (key = extractor name, or `--run-key`) like `test_set_runs.json`, and refuses
+to repeat a key without `--force`. `evaluate --set holdout` is silver-only (the owner did not
+label these postings) and writes `accuracy_silver_holdout_<date>.md`.
+
+Rule: do not tune rules, prompts or the field guide on the holdout results. If a rule changes
+after looking at them, select a new holdout (`--force`, new seed) before reporting accuracy.

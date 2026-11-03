@@ -60,3 +60,11 @@ def test_error_row_has_no_values(conn):
         None,
         "boom",
     )
+
+
+def test_relevance_is_rescored_when_the_version_changes(conn):
+    pid = _seed(conn)
+    store.save_relevance(conn, pid, "jev", 0.8, 0.4, "v1")
+    assert store.load_postings(conn, only_unscored_by="jev", relevance_version="v1") == []
+    rescore = store.load_postings(conn, only_unscored_by="jev", relevance_version="v2")
+    assert [p.id for p in rescore] == [pid]

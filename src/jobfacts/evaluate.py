@@ -19,11 +19,12 @@ import psycopg
 
 from jobfacts import labels as labels_mod
 from jobfacts import ordertest
+from jobfacts.extract.jev import RELEVANCE_THRESHOLD as _JEV_THRESHOLD
 from jobfacts.extract.spec import FIELDS, derive_seniority
 from jobfacts.label_app import prefill
 from jobfacts.stats import wilson
 
-RELEVANCE_THRESHOLD = 0.5
+RELEVANCE_THRESHOLD = _JEV_THRESHOLD
 RELEVANCE_EXTRACTOR = "jev_relevance"
 MAIN_EXTRACTORS = ("jev", "deepseek", "mistral")
 BINS = [(0.0, 0.5), (0.5, 0.7), (0.7, 0.9), (0.9, 1.0001)]
@@ -644,7 +645,7 @@ NOTES = """## Notes on reading this report
 - Runs made before the canton redesign (`*_v1`) have no `office_cantons`; their office rows
   are skipped.
 - Labels are the reference's judgement, not ground truth; `relevant` is compared with the Jev
-  relevance probability (>= 0.5 means relevant).
+  relevance probability (>= the threshold, 0.4, means relevant).
 """
 
 SILVER_NOTES = """- The reference is the majority of three model labellers (gpt, gemini_or, opus),
@@ -682,11 +683,15 @@ def build_report(
     reference: str = "owner",
     reference_note: str = "",
     owner_labels: dict[int, dict] | None = None,
+    set_name: str = "all",
 ) -> str:
     ids = {i["posting_id"] for i in items}
     labels = {p: label for p, label in labels.items() if p in ids}
     extractors = list(exts)
-    parts = [f"# Accuracy report ({today})\n", f"Test set: {len(items)} postings.\n"]
+    parts = [
+        f"# Accuracy report ({today})\n",
+        f"{'Held-out set' if set_name == 'holdout' else 'Test set'}: {len(items)} postings.\n",
+    ]
     if reference == "silver":
         parts.append(
             "**Reference: silver labels** (majority of three model labellers plus owner review"
@@ -724,34 +729,50 @@ def run_evaluate(
     data_dir: Path,
     today: str | None = None,
     reference: str = "silver",
+    set_name: str = "all",
 ) -> tuple[str, Path]:
     """Read the files in `data_dir`, build the report and write it to `data_dir/reports/`.
 
     `reference` is `silver` (`reference_labels.jsonl`, the model majority) or `owner`
-    (`labels.jsonl`)."""
+    (`labels.jsonl`). `set_name` `holdout` scores the runs in `holdout_runs.json` on
+    `holdout_set.jsonl` against `reference_labels_holdout.jsonl` (silver only: the owner never
+    labelled those postings)."""
     from jobfacts import reference as reference_mod
     from jobfacts.extract.jev import MODEL
-    from jobfacts.testset import load_test_set
+    from jobfacts.testset import HOLDOUT_FILE, load_test_set
 
     if reference not in ("silver", "owner"):
         raise ValueError("reference must be silver or owner")
-    items = load_test_set(data_dir / "test_set.jsonl")
-    owner = labels_mod.latest(data_dir / "labels.jsonl")
+    holdout = set_name == "holdout"
+    if holdout and reference != "silver":
+        raise ValueError("the held-out set has no owner labels: use the silver reference")
+    items_path = data_dir / (HOLDOUT_FILE.name if holdout else "test_set.jsonl")
+    if not items_path.exists():
+        raise FileNotFoundError(f"no {items_path.name}: run `jobfacts select-holdout`")
+    items = load_test_set(items_path)
+    owner = {} if holdout else labels_mod.latest(data_dir / "labels.jsonl")
     note = ""
     if reference == "silver":
-        if not (data_dir / reference_mod.REFERENCE_FILE).exists():
-            raise FileNotFoundError("no reference_labels.jsonl: run `jobfacts silver combine`")
-        labels = reference_mod.load_reference(data_dir)
-        note = reference_mod.audit_text(reference_mod.audit_stats(data_dir)).capitalize() + "."
+        ref_name = reference_mod.reference_file(set_name)
+        if not (data_dir / ref_name).exists():
+            sets = " --set holdout" if holdout else ""
+            raise FileNotFoundError(f"no {ref_name}: run `jobfacts silver combine{sets}`")
+        labels = reference_mod.load_reference(data_dir, set_name)
+        stats = reference_mod.audit_stats(data_dir, set_name)
+        note = reference_mod.audit_text(stats).capitalize() + "."
     else:
         labels = owner
-    run_ids = ordertest.read_runs(data_dir / "test_set_runs.json")
+    runs_name = "holdout_runs.json" if holdout else "test_set_runs.json"
+    run_ids = ordertest.read_runs(data_dir / runs_name)
     exts = {name: load_run(conn, rid) for name, rid in run_ids.items()}
     metas = {name: load_run_meta(conn, rid) for name, rid in run_ids.items()}
     relevance = load_relevance(conn, [i["posting_id"] for i in items], MODEL)
     today = today or date.today().isoformat()
-    text = build_report(items, labels, exts, metas, relevance, today, reference, note, owner)
-    suffix = "" if reference == "owner" else "_silver"
+    text = build_report(
+        items, labels, exts, metas, relevance, today, reference, note,
+        None if holdout else owner, set_name,
+    )  # fmt: skip
+    suffix = ("" if reference == "owner" else "_silver") + ("_holdout" if holdout else "")
     out = data_dir / "reports" / f"accuracy{suffix}_{today}.md"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(text, encoding="utf-8")

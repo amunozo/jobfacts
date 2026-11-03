@@ -82,6 +82,27 @@ def known_versions(conn: psycopg.Connection, employer_id: int) -> dict[str, str 
     return {job_id: version for job_id, version in rows}
 
 
+def rekey_source_ids(conn: psycopg.Connection, employer_id: int, key) -> int:
+    """Rewrite stored `source_job_id`s to `key(id)`, keeping each posting row (and its id).
+
+    Used when an employer starts merging several Workday sites: `r-17167-2` becomes `r-17167`.
+    Idempotent. A row whose new id is already taken by another row is left alone.
+    """
+    rows = conn.execute(
+        "SELECT id, source_job_id FROM postings WHERE employer_id = %s", (employer_id,)
+    ).fetchall()
+    taken = {job_id for _, job_id in rows}
+    changed = 0
+    with conn.transaction():
+        for row_id, job_id in rows:
+            new = key(job_id)
+            if new != job_id and new not in taken:
+                conn.execute("UPDATE postings SET source_job_id = %s WHERE id = %s", (new, row_id))
+                taken.add(new)
+                changed += 1
+    return changed
+
+
 def record_success(
     conn: psycopg.Connection,
     run_id: int,

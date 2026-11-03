@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 import psycopg
 
 from jobfacts.collect import store
-from jobfacts.collect.boards import BOARDS
+from jobfacts.collect.boards import BOARDS, workday
 from jobfacts.collect.http import make_client
 from jobfacts.collect.posting import BoardRead
 
@@ -38,6 +38,11 @@ def collect(
         e for e in employers if e[2] in fetchers and (only is None or only in (e[1], e[2]))
     ]
     summary = RunSummary(run_id=store.start_run(conn))
+    # Employers that merge several Workday sites key postings by requisition without the
+    # `-N` site suffix; stored ids from before the merge are rewritten (rows keep their id).
+    for e in employers:
+        if e[2] == "workday" and (e[4] or {}).get("extra_sites"):
+            store.rekey_source_ids(conn, e[0], workday.requisition_key)
     # Incremental fetchers (Workday) get what is already stored, so they read only the new.
     known = {
         e[0]: store.known_versions(conn, e[0])

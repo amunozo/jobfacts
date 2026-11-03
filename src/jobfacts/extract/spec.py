@@ -68,8 +68,9 @@ _YEARS: dict[str, str] = {
     "15_plus": "The posting requires a minimum of more than 15 years of experience.",
 }
 _YEARS["0"] = (
-    "The posting explicitly says no experience is needed (0 years, entry level, "
-    "'no prior experience')."
+    "The posting says that no experience at all is needed (0 years, entry level, "
+    "'no prior experience'). Waiving only some experience ('no prior AI experience "
+    "required', 'Erfahrung im Finanzsektor keine Voraussetzung') is not_stated."
 )
 
 FIELDS: dict[str, Field] = {
@@ -102,13 +103,18 @@ FIELDS: dict[str, Field] = {
             "remote_from_switzerland",
             "Can the person do this remote role while living in Switzerland?",
             {
-                "not_stated": "Remote, but the posting names no region at all.",
+                "not_stated": (
+                    "Remote, but the posting names no region where the remote person may live "
+                    "(office cities listed next to 'remote', such as 'London / New York / "
+                    "Remote', are not such a region)."
+                ),
                 "not_applicable": (
                     "The role is not remote (work mode is onsite, hybrid or not stated)."
                 ),
                 "allowed": (
                     "Remote, and the posting names Switzerland as allowed, or says anywhere "
-                    "in the world or globally (this wins over a list of countries)."
+                    "in the world or globally (this wins over a list of countries). A Swiss "
+                    "office or employer alone does not make it allowed."
                 ),
                 "unclear": (
                     'Remote, but the region is only "Europe", "EU", "EMEA", a time zone '
@@ -135,16 +141,23 @@ FIELDS: dict[str, Field] = {
         ),
         Field(
             "title_level",
-            "What seniority level does the job TITLE itself state? A range in the title "
-            "(for example 'Confirmé à Sénior') gives the lower level.",
+            "Read only the title line (T), never the description. What seniority level does "
+            "the job TITLE itself state? A range in the title (for example 'Confirmé à "
+            "Sénior') gives the lower level. A level in brackets counts: '(Senior) "
+            "Consultant' is senior, '(Junior-) Projektleiter' is junior.",
             {
-                "not_stated": "The title states no level ('Founding' is not a level).",
+                "not_stated": (
+                    "The title states no level. 'Founding', 'Postdoc', 'Member of Technical "
+                    "Staff', 'Member of Product Staff', 'Research Staff', a plain job name "
+                    "such as 'Researcher' or 'Expert', 'Resident', 'Experienced ...' and "
+                    "'Group Product Manager' are not levels."
+                ),
                 "internship": "Internship, apprenticeship, working student, thesis.",
                 "junior": "A junior, graduate, entry-level or associate title.",
                 "mid": 'A mid-level title (for example "Engineer II").',
                 "senior": "A senior title.",
                 "staff_principal": (
-                    "A staff, principal, lead, head-of, team-lead (Teamleiter) or "
+                    "A staff, principal, partner, lead, head-of, team-lead (Teamleiter) or "
                     "'Manager' as a rank ('Manager', 'Manager, X', 'Engineering "
                     "Manager'). Not a function title such as Sales, Key Account, "
                     "Application or Project Manager, Projektleiter or Testleiter."
@@ -180,10 +193,17 @@ GENERAL_RULES = (
 )
 
 RELEVANCE_QUESTION = (
-    "Is this a role whose main work is AI, machine learning, data science, data "
-    "engineering, data analytics, or research, or a software, infrastructure or product "
-    "role built around ML/AI? Business-intelligence and reporting roles (dashboards, "
-    "Power BI) do not count."
+    "Is the main day-to-day work of this role itself AI, machine learning, data science, "
+    "data engineering (including analytics engineering and web scraping / data acquisition), "
+    "SQL or statistical data analysis, or AI/ML or computational research; or software or "
+    "infrastructure engineering on ML/AI systems (including model-training infrastructure); "
+    "or product management of an ML/AI product; or solutions architecture or "
+    "forward-deployed / deployed engineering on an AI product; or building AI evaluations? "
+    "Judge the role's own tasks, not the employer's business: sales, account, "
+    "customer-success, support, recruiting, marketing, design, operations, finance, billing, "
+    "legal and data-centre roles do not count, even at an AI company. Business-intelligence, "
+    "reporting, market-insight and revenue-planning analyst roles (dashboards, Power BI) do "
+    "not count."
 )
 
 # office_cantons: not a one-value field. The model picks any number of canton codes (and
@@ -196,7 +216,9 @@ OFFICE_CANTONS_QUESTION = (
 )
 _NOT_REASONS = (
     "Answer no if the place is only mentioned for other reasons (company history, "
-    "customers, other roles, travel) or is only a planned future office."
+    "customers, other roles, travel) or is only a planned future office. A country or "
+    "region where a remote worker may live ('Remote - United States', 'Remote (Europe)', "
+    "'must be based in the US or UK') is not an office or work location."
 )
 CANTON_QUESTION = (
     "Does the posting name an office or work location for this role in canton {name} "
@@ -204,7 +226,7 @@ CANTON_QUESTION = (
 )
 OUTSIDE_QUESTION = (
     "Does the posting name an office or work location for this role outside Switzerland "
-    f"(in another country)? {_NOT_REASONS}"
+    f"(a city or office in another country)? {_NOT_REASONS}"
 )
 OFFICE_EVIDENCE_QUESTION = (
     "Which line of the posting names the office or work location of this role? "

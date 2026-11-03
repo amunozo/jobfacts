@@ -311,7 +311,7 @@ def _audit_section(data_dir: Path, summary: dict) -> list[str]:
     """Owner audit of unanimous answers (error rate of the reference) and split resolution."""
     from jobfacts import reference
 
-    stats = reference.audit_stats(data_dir)
+    stats = reference.audit_stats(data_dir, summary.get("set", "all"))
     lines = ["## 7. Audit of the reference", ""]
     k, n = stats["correct"], stats["audited"]
     summary["audit"] = {"correct": k, "audited": n, **{

@@ -89,7 +89,7 @@ def test_unsure_excluded_and_relevance_threshold():
     items = [item(1), item(2), item(3)]
     labels = {1: label(1, relevant="true"), 2: label(2, relevant="unsure"),
               3: label(3, relevant="false")}  # fmt: skip
-    rel = {1: 0.5, 2: 0.9, 3: 0.49}
+    rel = {1: 0.4, 2: 0.9, 3: 0.39}
     records, counts = ev.score_records(items, labels, {}, rel)
     assert counts["unsure"] == 1
     assert ev.summarize(records, extractor=ev.RELEVANCE_EXTRACTOR, field="relevant") == (2, 2, 0)
@@ -248,7 +248,7 @@ def test_jev_spec_version_covers_inputs(monkeypatch):
     for name, value in [
         ("MODEL", "jev-other"),
         ("CANTON_THRESHOLD", 0.7),
-        ("EXTRACTION_CODE_VERSION", 2),
+        ("EXTRACTION_CODE_VERSION", 99),
         ("STATE_HEADER", "other header"),
         ("SENTENCE_QUESTION", "other {question} {none}"),
         ("OFFICE_EVIDENCE_SUFFIX", " other"),

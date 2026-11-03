@@ -72,7 +72,7 @@ def _reference(args, data_dir) -> int:
             print("review-apply needs the decisions file")
             return 2
         try:
-            s = reference.review_apply(data_dir, args.file)
+            s = reference.review_apply(data_dir, args.file, args.set)
         except ValueError as e:
             print(f"nothing stored: {e}")
             return 2
@@ -153,7 +153,15 @@ def main(argv: list[str] | None = None) -> int:
     ext = sub.add_parser("extract", help="extract the fields of eligible postings")
     ext.add_argument("--extractor", choices=["jev", "deepseek", "mistral"], required=True)
     ext.add_argument("--limit", type=int)
+    ext.add_argument("--data-dir", type=Path, help="holdout folder (default data/private)")
     ext.add_argument("--posting-ids", type=int, nargs="+")
+    ext.add_argument(
+        "--set",
+        choices=["holdout"],
+        help="run on the held-out set and record the run in holdout_runs.json",
+    )
+    ext.add_argument("--run-key", help="key in holdout_runs.json (default: the extractor name)")
+    ext.add_argument("--force", action="store_true", help="replace an existing holdout run key")
     ext.add_argument(
         "--for-search",
         action="store_true",
@@ -185,6 +193,11 @@ def main(argv: list[str] | None = None) -> int:
     imp = sub.add_parser("import-applications", help="import application job descriptions")
     imp.add_argument("path", type=Path)
     sub.add_parser("select-test-set", help="write data/private/test_set.jsonl")
+    hol = sub.add_parser(
+        "select-holdout", help="write data/private/holdout_set.jsonl (see docs/labelling.md)"
+    )
+    hol.add_argument("--n", type=int, default=50)
+    hol.add_argument("--force", action="store_true", help="replace an existing holdout file")
     lab = sub.add_parser("label", help="start the labelling app on localhost")
     lab.add_argument("--port", type=int, default=8765)
     lab.add_argument(
@@ -195,6 +208,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     ev = sub.add_parser("evaluate", help="write the accuracy report (Markdown) from the labels")
     ev.add_argument("--data-dir", type=Path, help="folder with the test set (default data/private)")
+    ev.add_argument(
+        "--set",
+        choices=["all", "holdout"],
+        default="all",
+        help="all = the 100-posting test set (default); holdout = the held-out set",
+    )
     ev.add_argument(
         "--reference",
         choices=["silver", "owner"],
@@ -223,7 +242,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     sil.add_argument("file", nargs="?", type=Path, help="decisions file (review-apply)")
     sil.add_argument("--audit", type=int, default=30, help="audit sample size (review-sheet)")
-    sil.add_argument("--set", choices=["pilot", "de", "all"], default="pilot")
+    sil.add_argument("--set", choices=["pilot", "de", "all", "holdout"], default="pilot")
     sil.add_argument(
         "--data-dir", type=Path, help="folder with the test set (default data/private)"
     )
@@ -258,6 +277,15 @@ def main(argv: list[str] | None = None) -> int:
 
             select_test_set(conn)
             return 0
+        if args.command == "select-holdout":
+            from jobfacts.testset import select_holdout
+
+            try:
+                select_holdout(conn, args.n, force=args.force)
+            except FileExistsError as e:
+                print(e)
+                return 2
+            return 0
         if args.command == "label":
             from jobfacts.label_app.server import serve
             from jobfacts.testset import PRIVATE_DIR
@@ -272,12 +300,14 @@ def main(argv: list[str] | None = None) -> int:
 
             data_dir = args.data_dir or PRIVATE_DIR
             try:
-                text, path = run_evaluate(conn, data_dir, reference=args.reference)
-            except FileNotFoundError as e:
+                text, path = run_evaluate(
+                    conn, data_dir, reference=args.reference, set_name=args.set
+                )
+            except (FileNotFoundError, ValueError) as e:
                 print(e)
                 return 2
             n_labels = len(
-                reference.load_reference(data_dir)
+                reference.load_reference(data_dir, args.set)
                 if args.reference == "silver"
                 else labels.latest(data_dir / "labels.jsonl")
             )
@@ -309,6 +339,28 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "extract":
             from jobfacts.extract.run import make_extractor, run_extraction
 
+            if args.set == "holdout":
+                from jobfacts import holdout
+                from jobfacts.testset import PRIVATE_DIR
+
+                try:
+                    run_id, results = holdout.run_holdout(
+                        conn,
+                        make_extractor(args.extractor),
+                        args.data_dir or PRIVATE_DIR,
+                        key=args.run_key or args.extractor,
+                        force=args.force,
+                        limit=args.limit,
+                    )
+                except FileExistsError as e:
+                    print(e)
+                    return 2
+                failed = sum(1 for x in results if x.error)
+                cost = sum(x.cost_usd for x in results)
+                print(
+                    f"holdout run {run_id}: {len(results)} postings, {failed} errors, ${cost:.4f}"
+                )
+                return 0
             run_id, results = run_extraction(
                 conn,
                 make_extractor(args.extractor),

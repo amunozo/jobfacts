@@ -112,6 +112,19 @@ def job_id_from_url(url: str) -> str:
     return last.rsplit("_", 1)[-1] if "_" in last else last
 
 
+_SUFFIX = re.compile(r"^(.+\d)-\d+$")
+
+
+def requisition_key(job_id: str) -> str:
+    """Requisition id without the trailing site suffix: `r-17167-2` and `r-17167-4` -> `r-17167`.
+
+    The same requisition has a different `-N` on each Workday site of an employer. Ids without
+    a suffix (`r-19892`, `R-0006447`) are returned unchanged.
+    """
+    match = _SUFFIX.match(job_id)
+    return match.group(1) if match else job_id
+
+
 def url_location_text(url: str) -> str:
     """Location segment after `/job/`, de-slugged: `USA---NY---New-York` -> `USA NY New York`."""
     path = urlparse(url).path
@@ -215,18 +228,42 @@ def fetch(
     client = LimitedClient(client, limiter or DEFAULT_LIMITER)
     base = f"https://{board_id}.{extra['wd']}.myworkdayjobs.com"
     robots = load_robots(client, base)
-    sitemap_url = f"{base}/{extra['site']}/siteMap.xml"
-    if not robots.can_fetch(USER_AGENT, sitemap_url):
-        raise PermissionError(f"robots.txt disallows {sitemap_url}")
     prefilter = extra.get("prefilter", True)  # false for employers whose jobs are all Swiss
-    entries = parse_sitemap(_get(client, sitemap_url, 2, accept="application/xml, text/xml").text)
+    sites = [extra["site"], *extra.get("extra_sites", [])]
+    merge = len(sites) > 1 or "extra_sites" in extra  # one posting per requisition, not per URL
+    key_of = (lambda url: requisition_key(job_id_from_url(url))) if merge else job_id_from_url
 
-    stats: Counter = Counter(sitemap=len(entries))
+    stats: Counter = Counter()
     failures: Counter = Counter()
+    entries: dict[str, tuple[str, str | None]] = {}  # key -> (url, lastmod); main site wins
+    capped_sites = []
+    site_notes = []
+    for index, site in enumerate(sites):
+        sitemap_url = f"{base}/{site}/siteMap.xml"
+        try:
+            if not robots.can_fetch(USER_AGENT, sitemap_url):
+                raise PermissionError(f"robots.txt disallows {sitemap_url}")
+            listed = parse_sitemap(
+                _get(client, sitemap_url, 2, accept="application/xml, text/xml").text
+            )
+        except (PermissionError, httpx.HTTPError, ValueError) as error:
+            if index == 0:
+                raise  # the main site must be readable, otherwise the board is not read
+            # An unreadable extra site means we cannot tell what it holds: read the rest, close
+            # nothing.
+            capped_sites.append(site)
+            site_notes.append(f"extra site {site} not read ({type(error).__name__}: {error})")
+            continue
+        stats["sitemap"] += len(listed)
+        site_notes.append(f"{site} {len(listed)}")
+        if len(listed) == SITEMAP_CAP:
+            capped_sites.append(site)
+        for url, lastmod in listed:
+            entries.setdefault(key_of(url), (url, lastmod))
+
     seen: set[str] = set()
     to_fetch = []
-    for url, lastmod in entries:
-        job_id = job_id_from_url(url)
+    for job_id, (url, lastmod) in entries.items():
         seen.add(job_id)
         if prefilter and not url_is_candidate(url):
             stats["skipped_by_prefilter"] += 1
@@ -237,13 +274,13 @@ def fetch(
         elif not robots.can_fetch(USER_AGENT, url):
             stats["robots_disallowed"] += 1
         else:
-            to_fetch.append((url, lastmod))
+            to_fetch.append((job_id, url, lastmod))
 
     postings = []
-    for index, (url, lastmod) in enumerate(to_fetch):
+    for index, (job_id, url, lastmod) in enumerate(to_fetch):
         try:
             page = _get(client, url, 2, accept=_PAGE_ACCEPT).text
-            postings.append(parse_posting(page, url, lastmod))
+            postings.append(replace(parse_posting(page, url, lastmod), source_job_id=job_id))
         except httpx.HTTPStatusError as error:
             code = error.response.status_code
             failures[f"HTTP {code}"] += 1
@@ -262,12 +299,16 @@ def fetch(
         f"fetched {stats['fetched']}, stored {len(postings)}, "
         f"robots disallowed {stats['robots_disallowed']}, failures {sum(failures.values())}"
     )
-    capped = len(entries) == SITEMAP_CAP
-    if capped:
-        notes += f"; sitemap capped at {SITEMAP_CAP}, so nothing is closed"
+    if merge:
+        notes += f"; sites: {', '.join(site_notes)}; merged {len(entries)} requisitions"
+    if capped_sites:
+        notes += (
+            f"; capped or unread sitemap ({', '.join(capped_sites)}; cap is {SITEMAP_CAP}), "
+            "so nothing is closed"
+        )
     if failures:
         notes += " (" + "; ".join(f"{r} x{n}" for r, n in failures.items()) + ")"
-    return BoardRead(postings=postings, seen_ids=seen, notes=notes, close_missing=not capped)
+    return BoardRead(postings=postings, seen_ids=seen, notes=notes, close_missing=not capped_sites)
 
 
 fetch.incremental = True

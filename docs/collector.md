@@ -68,5 +68,22 @@ requested; a disallowed sitemap fails the read), then `/<site>/siteMap.xml`, the
   postings are not re-read.
 - A stored posting missing from the sitemap is closed. Exception: a sitemap with exactly 100
   entries is a capped list (most big tenants), so nothing is closed for it.
+- Extra sites: a tenant with a capped main sitemap can list more sites by hand, e.g. Julius
+  Baer `site = "External"` (capped at 100) plus `extra_sites = ["Technology"]` (81 URLs, allowed
+  and listed in its robots.txt). Every site is read (sitemap, robots check, same rate limit).
+  The same requisition has a different `-N` suffix per site (Data Scientist: `r-17167-2` on
+  External, `r-17167-4` on Technology), so for employers with `extra_sites` a posting is keyed
+  by the requisition without the suffix (`r-17167`) and appears once; the main site's URL wins
+  when both list it, and the extra site's page is then never fetched. Employers without
+  `extra_sites` keep the full id.
+  Existing rows: at the start of a run, stored ids of such employers are rewritten from
+  `r-17167-2` to `r-17167` (`store.rekey_source_ids`; same row, same posting id, so extractions
+  stay attached; idempotent; a clash with an existing row is skipped).
+- Closing rule with several sites: stored postings are closed only if EVERY site was read and
+  none is capped (fewer than 100 URLs). If any site is capped, or an extra site could not be
+  read (error or robots.txt disallow; the main site failing fails the whole board), nothing is
+  closed, because a posting missing from one site may still be on the other. A posting that
+  disappears from an uncapped extra site therefore stays open while the main site is capped
+  (Julius Baer today), a conservative choice: stale open postings rather than wrongly closed.
 - "Remote" is added for `jobLocationType = TELECOMMUTE`, unless nearly every posting of the
   employer has it (several tenants flag everything).

@@ -327,3 +327,50 @@ Newest at the bottom.
 - **Rejected:** replacing job_watch's board polling now (loses the
   comparison); copying jobfacts code into the vault; filtering German and
   location inside jobfacts (only-watch rows would look like misses).
+
+## 2026-11-03: Extraction rule fixes (wording plus three code rules)
+- **What:** (1) Jev wording: a remote-worker country or region ("Remote - United
+  States", "Remote (Europe)") is not an office; office cities next to "remote"
+  are no region for `remote_from_switzerland`, and a Swiss office or employer
+  alone does not make it `allowed`; `title_level` reads the title line only and
+  names the non-levels (Postdoc, Member of Technical/Product Staff, Research
+  Staff, plain Researcher, Expert, Resident, "Experienced ...", Group Product
+  Manager); Partner is `staff_principal`; a bracketed level counts;
+  `min_years` 0 only when no experience at all is needed. (2) Code rules after
+  Jev (`extract/rules.py`): `title_level` is kept only if the title contains a
+  keyword for that level (`seniority` follows from the corrected level); a canton
+  the model picked is dropped unless `canton_hints()` finds a place in it
+  (hinted cantons are never added); `remote_from_switzerland` is
+  `not_applicable` unless `work_mode` is `remote`.
+- **Why:** errors found in the 100-posting test set were mostly the model
+  reading the description for the title, or inventing a canton from a country
+  line; code can check both exactly, which wording cannot.
+- **Rejected:** tuning the canton probability threshold (fits the test set, no
+  new information); adding hinted cantons the model missed (hints include
+  customers and history); a title-level keyword list that also fills in levels
+  (would guess where the title is silent).
+
+## 2026-11-03: Relevance wording, threshold 0.4 and a title list
+- **What:** the relevance question (wording "W1") judges the role's own tasks, not
+  the employer's business: sales, customer success, support, recruiting,
+  marketing, design, operations, finance, billing, legal and data-centre roles do
+  not count even at an AI company; web scraping and analytics engineering count
+  as data engineering. Owner decisions: product managers of AI/ML products and
+  solutions architects / forward-deployed engineers on AI products are
+  relevant; SQL and statistical data analysts count, market-insight,
+  revenue-planning and BI analysts do not. Threshold 0.5 -> 0.4. A title list
+  (`extract/rules.py: title_excluded`) scores plainly non-technical titles 0
+  without a model call: always for sales, recruiting/talent acquisition,
+  designer, technician, customer success, "not seeing the right opportunity";
+  only when the title names no engineer/scientist/researcher/developer/architect/SWE/ML/AI
+  for insights, billing, payroll and partnerships. Title only, never the
+  description (a "payroll partner" contract note hit a Data Engineer). Each
+  relevance row stores a version (question, model, threshold, title rules), so a
+  change re-scores everything once.
+- **Why:** the old question accepted about 1,700 postings, many of them
+  non-technical roles at AI companies (support, design, data-centre technicians,
+  insight analysts). The wording removes most; the list removes what is still left
+  by plain title words.
+- **Rejected:** only raising the threshold (it drops good roles first, since the
+  false positives score 0.5-0.7 like true ones); copying job_watch's title regexes
+  (they also exclude product managers and solutions roles, which the owner wants).

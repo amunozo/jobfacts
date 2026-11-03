@@ -28,7 +28,10 @@ def run_relevance(
     rescore: bool = False,
     progress: Callable[[int, int], None] | None = None,
 ) -> RelevanceSummary:
-    postings = store.load_postings(conn, only_unscored_by=None if rescore else model)
+    version = jev.relevance_version()
+    postings = store.load_postings(
+        conn, only_unscored_by=None if rescore else model, relevance_version=version
+    )
 
     def score(p: PostingText) -> tuple[PostingText, float | None]:
         try:
@@ -42,7 +45,7 @@ def run_relevance(
             if prob is None:
                 errors += 1
                 continue
-            store.save_relevance(conn, p.id, model, prob, threshold)
+            store.save_relevance(conn, p.id, model, prob, threshold, version)
             scored += 1
             relevant += prob >= threshold
             if i % 100 == 0:

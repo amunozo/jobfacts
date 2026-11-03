@@ -9,9 +9,13 @@ from jobfacts.extract.spec import FIELDS, OFFICE_CANTONS
 
 
 def load_postings(
-    conn: psycopg.Connection, ids: list[int] | None = None, only_unscored_by: str | None = None
+    conn: psycopg.Connection,
+    ids: list[int] | None = None,
+    only_unscored_by: str | None = None,
+    relevance_version: str | None = None,
 ) -> list[PostingText]:
-    """Open postings (or the given ids), optionally only those without a relevance row."""
+    """Open postings (or the given ids), optionally only those without a relevance row for
+    this model (and, if given, this relevance version: older scores count as missing)."""
     sql = "SELECT p.id, p.title, p.location_raw, p.description_text FROM postings p WHERE "
     params: list = []
     if ids:
@@ -24,18 +28,27 @@ def load_postings(
             " AND NOT EXISTS (SELECT 1 FROM relevance r WHERE r.posting_id = p.id AND r.model = %s)"
         )
         params.append(only_unscored_by)
+        if relevance_version:
+            sql = sql[:-1] + " AND r.spec_version = %s)"
+            params.append(relevance_version)
     rows = conn.execute(sql + " ORDER BY p.id", params).fetchall()
     return [PostingText.build(*row) for row in rows]
 
 
 def save_relevance(
-    conn: psycopg.Connection, posting_id: int, model: str, probability: float, threshold: float
+    conn: psycopg.Connection,
+    posting_id: int,
+    model: str,
+    probability: float,
+    threshold: float,
+    spec_version: str | None = None,
 ) -> None:
     conn.execute(
-        "INSERT INTO relevance (posting_id, model, probability, relevant) VALUES (%s,%s,%s,%s) "
+        "INSERT INTO relevance (posting_id, model, probability, relevant, spec_version) "
+        "VALUES (%s,%s,%s,%s,%s) "
         "ON CONFLICT (posting_id, model) DO UPDATE SET probability = EXCLUDED.probability, "
-        "relevant = EXCLUDED.relevant, created_at = now()",
-        (posting_id, model, probability, probability >= threshold),
+        "relevant = EXCLUDED.relevant, spec_version = EXCLUDED.spec_version, created_at = now()",
+        (posting_id, model, probability, probability >= threshold, spec_version),
     )
 
 

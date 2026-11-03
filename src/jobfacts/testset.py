@@ -7,6 +7,7 @@ that evaluation stays reproducible when a posting later changes or closes.
 import json
 import random
 from collections import Counter, defaultdict
+from datetime import date
 from pathlib import Path
 
 import psycopg
@@ -18,6 +19,9 @@ from jobfacts.extract.spec import FIELDS
 SEED = 20261102
 PRIVATE_DIR = Path(__file__).resolve().parents[2] / "data" / "private"
 TEST_SET_FILE = PRIVATE_DIR / "test_set.jsonl"
+HOLDOUT_FILE = PRIVATE_DIR / "holdout_set.jsonl"
+HOLDOUT_SEED = 20261104
+BORDERLINE_RANGE = (0.3, 0.6)
 TOTAL = 100
 BOARD_TARGET = 50
 N_DE_OTHER = 20
@@ -205,3 +209,134 @@ def print_summary(items: list[dict]) -> None:
 def load_test_set(path: Path = TEST_SET_FILE) -> list[dict]:
     with path.open(encoding="utf-8") as f:
         return [json.loads(line) for line in f if line.strip()]
+
+
+# ----- held-out set -------------------------------------------------------------------------
+# A second set of board postings that the rules were never tuned on. It is chosen only from
+# postings outside the test set and outside the owner's labels, with a fixed seed and without
+# looking at extractor disagreement (the test set used that), so accuracy on it is a fair check.
+
+ITEM_KEYS = [
+    "order", "posting_id", "origin", "language", "group", "stratum", "employer", "title",
+    "location_raw", "description_text", "sentences",
+]  # fmt: skip
+
+
+def holdout_targets(n: int) -> dict[str, dict[str, int]]:
+    """Per language: total, borderline and (nominal) other counts. At n=50: en 25, de 13, fr 12;
+    borderline 5/3/2. Relevant postings (`*_ai`) take the rest; `*_other` (low relevance) takes
+    what a stratum could not fill."""
+    de, fr = round(0.26 * n), round(0.24 * n)
+    return {
+        "en": {"total": n - de - fr, "borderline": round(0.1 * n)},
+        "de": {"total": de, "borderline": round(0.06 * n)},
+        "fr": {"total": fr, "borderline": round(0.04 * n)},
+    }
+
+
+def choose_holdout(
+    board: list[dict], excluded_ids: set[int], excluded_titles: set[tuple], n: int, seed: int
+) -> list[dict]:
+    """Pick the held-out items from `board` items (as returned by `_load`). Pure and
+    deterministic for a given input and seed."""
+    rng = random.Random(seed)
+    seen_titles = set(excluded_titles)
+    pool = [
+        b
+        for b in sorted(board, key=lambda b: b["posting_id"])
+        if b["origin"] == "board"
+        and b["eligible"]
+        and b["language"] in LANG_ORDER
+        and b["posting_id"] not in excluded_ids
+        and (b["employer"], b["title"]) not in excluded_titles
+    ]
+    chosen: list[dict] = []
+
+    def take(cands: list[dict], per_employer: int, count: int, stratum: str) -> list[dict]:
+        cands = [c for c in cands if (c["employer"], c["title"]) not in seen_titles]
+        out = []
+        for c in _spread(cands, "employer", per_employer, count, rng):
+            if (c["employer"], c["title"]) in seen_titles:
+                continue
+            seen_titles.add((c["employer"], c["title"]))
+            c = {**c, "group": stratum, "stratum": stratum}
+            out.append(c)
+        return out
+
+    lo, hi = BORDERLINE_RANGE
+    for lang, t in holdout_targets(n).items():
+        mine = [b for b in pool if b["language"] == lang]
+        border = take(
+            [b for b in mine if b["prob"] is not None and lo <= b["prob"] <= hi],
+            2,
+            t["borderline"],
+            f"{lang}_borderline",
+        )
+        used = {b["posting_id"] for b in border}
+        # German: one posting passes 0.5, so the "relevant" cut-off is the looser 0.35 as in the
+        # test set.
+        cut = DE_AI_MIN_PROB if lang == "de" else jev.RELEVANCE_THRESHOLD
+        rel = [b for b in mine if b["posting_id"] not in used and (b["prob"] or 0) >= cut]
+        want_ai = t["total"] - t["borderline"] - (2 if lang != "en" else 0)
+        ai = take(rel, 2, want_ai, f"{lang}_ai")
+        if len(ai) < want_ai:  # few relevant postings: allow more per employer before "other"
+            have = {b["posting_id"] for b in ai}
+            ai += take(
+                [b for b in rel if b["posting_id"] not in have], 6, want_ai - len(ai), f"{lang}_ai"
+            )
+        used |= {b["posting_id"] for b in ai}
+        rest = [b for b in mine if b["posting_id"] not in used]
+        other = take(rest, 2, t["total"] - len(border) - len(ai), f"{lang}_other")
+        chosen += border + ai + other
+
+    ordered = _interleave(chosen, rng)
+    for i, item in enumerate(ordered):
+        item["order"] = i
+    return ordered
+
+
+def select_holdout(
+    conn: psycopg.Connection,
+    n: int = 50,
+    path: Path = HOLDOUT_FILE,
+    force: bool = False,
+    test_set_path: Path = TEST_SET_FILE,
+    labels_path: Path | None = None,
+    seed: int = HOLDOUT_SEED,
+) -> list[dict]:
+    """Write `holdout_set.jsonl` (+ `holdout_set.meta.json`). Refuses to overwrite without
+    `force`, because labels and runs refer to it."""
+    path = Path(path)
+    if path.exists() and not force:
+        raise FileExistsError(f"{path} exists; use --force to replace it")
+    test_items = load_test_set(test_set_path) if Path(test_set_path).exists() else []
+    labels_path = labels_path or Path(test_set_path).parent / "labels.jsonl"
+    owner_ids: set[int] = set()
+    if Path(labels_path).exists():
+        with Path(labels_path).open(encoding="utf-8") as f:
+            owner_ids = {json.loads(x)["posting_id"] for x in f if x.strip()}
+    excluded = {i["posting_id"] for i in test_items} | owner_ids
+    titles = {(i["employer"], i["title"]) for i in test_items if "employer" in i}
+    items = choose_holdout(_load(conn, "board"), excluded, titles, n, seed)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as f:
+        for item in items:
+            f.write(json.dumps({k: item[k] for k in ITEM_KEYS}, ensure_ascii=False) + "\n")
+    meta = {
+        "seed": seed,
+        "n": len(items),
+        "requested": n,
+        "targets": holdout_targets(n),
+        "strata": dict(Counter(i["stratum"] for i in items)),
+        "languages": dict(Counter(i["language"] for i in items)),
+        "excluded_test_set": len(test_items),
+        "excluded_owner_labels": len(owner_ids),
+        "selected_at": date.today().isoformat(),
+    }
+    path.with_suffix(".meta.json").write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8")
+    print_summary(items)
+    return items
+
+
+def load_holdout(path: Path = HOLDOUT_FILE) -> list[dict]:
+    return load_test_set(path)
