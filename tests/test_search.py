@@ -129,6 +129,7 @@ class Seed:
             "french": "not_mentioned",
             "min_years": "not_stated",
             "title_level": "not_stated",
+            "contract_type": "not_stated",
         }
         v.update(values)
         r = Result(
@@ -176,6 +177,7 @@ def test_latest_successful_extraction_is_used(conn, seed):
             "french": "not_mentioned",
             "min_years": "not_stated",
             "title_level": "not_stated",
+            "contract_type": "not_stated",
         },
         office_cantons=["BE"],
     )
@@ -333,6 +335,7 @@ def test_incremental_extraction_skips_unchanged_and_application_postings(conn, s
                     "french": "not_mentioned",
                     "min_years": "not_stated",
                     "title_level": "not_stated",
+                    "contract_type": "not_stated",
                 }
             )
 

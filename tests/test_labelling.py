@@ -17,6 +17,7 @@ GOOD = {
     "french": ("not_mentioned", []),
     "min_years": ("3", [2]),
     "title_level": ("not_stated", []),
+    "contract_type": ("permanent", [1]),
 }
 
 
@@ -187,7 +188,8 @@ def test_prefilled_item_via_api(tmp_path):
             "c": extraction(work_mode="remote"),
         }
     }
-    c = TestClient(create_app([item(1, 5)], tmp_path / "l.jsonl", ext, blind_count=2))
+    items = [item(7, 0), item(8, 1), item(1, 5)]  # two earlier postings fill the blind slots
+    c = TestClient(create_app(items, tmp_path / "l.jsonl", ext, blind_count=2))
     r = c.get("/api/items/1").json()
     assert r["mode"] == "prefilled"
     assert r["prefill"]["fields"]["work_mode"]["value"] == "hybrid"
@@ -282,7 +284,42 @@ def test_build_app_reads_and_writes_the_given_data_dir(tmp_path, conn):
     assert len(labels.load_all(tmp_path / "labels.jsonl")) == 1
 
 
+def test_build_app_skips_german_by_default(tmp_path, conn):
+    from jobfacts.label_app.server import build_app
+
+    rows = [item(1, 0), item(2, 1, "de"), item(3, 2, "fr")]
+    (tmp_path / "test_set.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+    (tmp_path / "test_set_runs.json").write_text('{"jev": 999}')
+    c = TestClient(build_app(tmp_path, conn))
+    assert [x["posting_id"] for x in c.get("/api/items").json()] == [1, 3]
+    assert c.get("/api/items/2").status_code == 404
+    c = TestClient(build_app(tmp_path, conn, languages=("en", "fr", "de")))
+    assert [x["posting_id"] for x in c.get("/api/items").json()] == [1, 2, 3]
+
+
+def test_blind_counts_served_postings_not_order(tmp_path):
+    # Orders 0, 5, 9: with two blind postings, the first two served ones are blind
+    # even though order 5 is past the cut-off.
+    items = [item(1, 0), item(2, 5), item(3, 9)]
+    c = TestClient(create_app(items, tmp_path / "l.jsonl", blind_count=2))
+    modes = {x["posting_id"]: x["mode"] for x in c.get("/api/items").json()}
+    assert modes == {1: "blind", 2: "blind", 3: "prefilled"}
+
+
 def test_prefill_ignores_old_and_variant_runs():
     from jobfacts.label_app import server
 
     assert server.PREFILL_EXTRACTORS == ("jev", "deepseek", "mistral")
+
+
+def test_contract_type_is_a_required_field(client):
+    p = payload()
+    del p["fields"]["contract_type"]
+    assert client.put("/api/items/1/label", json=p).json()["errors"] == {"contract_type": "missing"}
+    bad = payload(contract_type={"value": "temp", "sentences": []})
+    assert (
+        "not allowed"
+        in client.put("/api/items/1/label", json=bad).json()["errors"]["contract_type"]
+    )
+    ok = payload(contract_type={"value": "fixed_term", "sentences": [1]})
+    assert client.put("/api/items/1/label", json=ok).status_code == 200

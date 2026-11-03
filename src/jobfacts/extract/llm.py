@@ -37,8 +37,8 @@ location for this role (a city, town or village counts for its canton; use your 
 knowledge of Swiss geography), as a list of canton codes, plus "outside_switzerland" if \
 an office outside Switzerland is named. An empty list means the posting names no office \
 location. Do not include places mentioned only for other reasons (company history, \
-customers, other roles, travel). Give at least one supporting id when the list is not \
-empty. Cantons (code: name, some major places):
+customers, other roles, travel) or only planned for the future. Give at least one \
+supporting id when the list is not empty. Cantons (code: name, some major places):
 {cantons}
 
 Reply with one JSON object and nothing else, in this shape:
@@ -216,11 +216,15 @@ def deepseek_extractor() -> LLMExtractor:
     )
 
 
-def mistral_extractor() -> LLMExtractor:
+def openrouter_client(timeout: float = 180) -> OpenAI:
+    """OpenAI-compatible client for OpenRouter (key from `.env`, never printed)."""
     load_dotenv()
-    client = OpenAI(
+    return OpenAI(
         api_key=os.environ["OPENROUTER_API_KEY"],
         base_url="https://openrouter.ai/api/v1",
-        timeout=180,
+        timeout=timeout,
     )
-    return LLMExtractor("mistral", MISTRAL_MODEL, client, 0.15, 0.60)
+
+
+def mistral_extractor() -> LLMExtractor:
+    return LLMExtractor("mistral", MISTRAL_MODEL, openrouter_client(), 0.15, 0.60)

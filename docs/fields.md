@@ -32,15 +32,33 @@ these names and values. Change a field here first, then everywhere else.
 | `remote` | Fully remote (occasional travel or offsites still count as remote). |
 | `not_stated` | The posting does not say. |
 
+An office location with nothing said about home or remote working is
+`not_stated`, not `onsite`: `onsite` needs a statement.
+
+Decided cases (owner, 2026-11-03):
+- Both options offered ("Zurich / Remote", "hybrid in Nuremberg or fully
+  remote") → `remote`.
+- Home working mentioned only as a benefit (home-office allowance, télétravail,
+  "Möglichkeit für Home-Office") → `hybrid`.
+- "Primarily on site", "grundsätzlich vom Office aus", "office-first" → `onsite`.
+- Several offices on fixed days ("4 days Lausanne, 1 day Fribourg") → `onsite`.
+- A tag such as #LI-HYBRID counts as a statement.
+- When the job board's field and the description disagree, the description wins.
+
 ### `office_cantons`
 A set of values: any of the 26 Swiss canton codes (`ZH`, `BE`, ... `JU`) and
 `outside_switzerland` (an office outside Switzerland is named). The model decides which
 cantons have an office or work location for this role, from the title, the job board's
 location field and the description; a city, town or village counts for its canton. A
 place mentioned only for other reasons (company history, customers, other roles, travel)
-does not count. **Empty set = not stated.** A non-empty set needs supporting
+does not count, and neither does a planned future office ("a Zurich office in 2027"). **Empty set = not stated.** A non-empty set needs supporting
 sentence(s); an empty one carries none. Accuracy is the exact match of the whole set
 (main location metric), plus precision and recall per canton.
+
+Decided cases: a remote role that only lists countries where the person
+may live, with no office named, is an empty set. An ambiguous place name
+(Reinach is in BL and AG) that nothing in the posting resolves gets both
+cantons.
 
 ### `office_places`
 Not extracted by a model. Code looks for place names in the posting (location field,
@@ -53,11 +71,14 @@ for search; secondary metric only (it is as good as the cantons).
 ### `remote_from_switzerland`
 | Value | Meaning |
 |---|---|
-| `allowed` | Remote, and the posting names Switzerland as allowed, or says anywhere in the world. |
+| `allowed` | Remote, and the posting names Switzerland as allowed, or says anywhere in the world or "globally". A worldwide statement wins over a list of countries. |
 | `unclear` | Remote, but the region is only "Europe", "EU", "EMEA", a time zone (e.g. CET), or similar, without naming Switzerland. |
 | `not_allowed` | Remote, but the posting lists countries without Switzerland, or allows only one other country. |
 | `not_stated` | Remote, but the posting names no region at all. |
 | `not_applicable` | The role is not remote (`work_mode` is `onsite`, `hybrid` or `not_stated`). |
+
+Decided cases: a remote country list without Switzerland that includes
+"EMEA" → `unclear`; "choose where you live" → `unclear`.
 
 ## 2. Language requirement
 
@@ -66,7 +87,7 @@ Italian are not extracted in Milestone 1.
 
 | Value | Meaning | Typical wording |
 |---|---|---|
-| `required_fluent` | Required at a high level. | C1, C2, native, fluent, excellent, verhandlungssicher, fliessend, courant |
+| `required_fluent` | Required at a high level. | C1, C2, native, fluent, excellent, very good, verhandlungssicher, fliessend, courant |
 | `required_intermediate` | Required below fluent. | A2-B2, good, working knowledge, gute Kenntnisse, bonnes connaissances |
 | `required_level_not_stated` | Required, no level given. | "German required", "Deutsch ist ein Muss" |
 | `either_required` | One of several languages is required, any of them is enough. | "fluent in German or French" (both fields get this value) |
@@ -77,16 +98,20 @@ A posting written in German does not by itself state a German requirement:
 the field stays `not_mentioned`. The posting language (measured by code) is
 available as a separate filter.
 
+Decided cases: "English and/or French" → `french` is `nice_to_have` (English
+alone is enough); a school-grade prerequisite ("good grades in German") →
+`required_intermediate`; "maîtrise du français" → `required_fluent`.
+
 ## 3. `seniority`
 
 | Value | Meaning |
 |---|---|
-| `internship` | Internship, working student, thesis. |
+| `internship` | Internship, apprenticeship (Lehrstelle), working student, thesis. |
 | `junior` | 0-1 years required, or a junior / graduate / entry-level title. |
 | `mid` | 2-4 years required, or a mid-level title (e.g. "Engineer II"). |
 | `senior` | 5+ years required, or a senior title. |
 | `staff_principal` | Staff, principal, lead or head-of title. Never from years alone. |
-| `not_stated` | No years, no level in the title. |
+| `not_stated` | No years, no level in the title ("Founding" is not a level; only co-founder would be). |
 
 Extracted as two parts, combined by code:
 - `min_years`: `0` to `15`, `15_plus`, or `not_stated` (minimum years of
@@ -97,10 +122,36 @@ Extracted as two parts, combined by code:
 Order of evidence:
 
 1. **Years of experience**, when stated. "PhD or 3 years" uses the 3. A range
-   ("3-5 years") uses the minimum.
+   ("3-5 years") uses the minimum. A degree is never converted into years:
+   "MSc or PhD, or equivalent experience" is `not_stated`.
+   Any range or set of alternatives gives the lower end; this also holds for a
+   level range in the title ("Confirmé à Sénior" gives `mid`).
 2. **Otherwise the title.**
 3. **Otherwise `not_stated`.**
 
 When years and title disagree ("Senior ML Engineer, 2+ years"), years win,
 except that a staff/principal/lead/head-of title always gives
 `staff_principal`, and an internship title always gives `internship`.
+
+Decided cases (title level): a team or unit lead (Teamleiter, Leiter
+Abteilung) and a plain "Manager" title → `staff_principal`; Projektleiter and
+Testleiter (roles, not ranks) → `not_stated`; "Postdoctoral Researcher" →
+`not_stated`; "Associate" as the lower end of a range → `junior`.
+
+Decided cases (years): years listed as preferred or nice to have still count;
+separate requirements that all apply ("3+ years ML and 2+ years Python") take
+the highest; a range or alternatives take the lowest.
+
+## 4. `contract_type`
+
+| Value | Meaning | Typical wording |
+|---|---|---|
+| `permanent` | Open-ended position. | unbefristet, CDI, permanent position |
+| `fixed_term` | An end date or limited duration is stated. | befristet, CDD, 12-month contract, maternity cover, temporary staffing |
+| `not_stated` | The posting does not say. | |
+
+Nothing is assumed: an internship is **not** taken to be `fixed_term`, and a
+missing statement is `not_stated` (no quote). Added 2026-11-03 so that fixed-term
+roles can be filtered out of the search. "Employment type: Contract" with no duration → `fixed_term`. "Full time" is about hours, not
+contract length, so it does not make a post `permanent`. **Search** treats
+`not_stated` as permanent: a "no fixed-term" filter drops only `fixed_term`.

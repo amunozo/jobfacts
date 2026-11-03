@@ -6,16 +6,16 @@
 
 const ORDER = [
   "relevant", "work_mode", "remote_from_switzerland", "office_cantons",
-  "german", "french", "min_years", "title_level",
+  "german", "french", "min_years", "title_level", "contract_type",
 ];
 const LABEL = {
   relevant: "Relevant", work_mode: "Work mode", remote_from_switzerland: "Remote from CH",
   office_cantons: "Office locations", german: "German", french: "French",
-  min_years: "Min. years", title_level: "Title level",
+  min_years: "Min. years", title_level: "Title level", contract_type: "Contract type",
 };
 const ABBR = {
   work_mode: "MODE", remote_from_switzerland: "RCH", office_cantons: "LOC",
-  german: "DE", french: "FR", min_years: "YRS", title_level: "TTL",
+  german: "DE", french: "FR", min_years: "YRS", title_level: "TTL", contract_type: "CTR",
 };
 const RELEVANT_DEFS = {
   true: "An AI, ML, data or research role: the kind of role the search keeps.",
@@ -32,6 +32,7 @@ const HINTS = {
   french: "A posting written in French does not by itself require French. “German or French” → either_required in both.",
   min_years: "A range uses the minimum (“3–5 years” → 3). “PhD or 3 years” → 3. Type the number; N = not stated, + = 15_plus.",
   title_level: "From the title (T) only. Lead, head of, staff, principal → staff_principal.",
+  contract_type: "Permanent only when stated (unbefristet, CDI). An end date, a set duration, maternity cover or temporary staffing → fixed_term. An internship is not assumed fixed_term.",
 };
 const TITLE_ID = 0;
 const LOCATION_ID = -1;

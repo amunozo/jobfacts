@@ -21,6 +21,7 @@ from jobfacts import labels as labels_mod
 from jobfacts import ordertest
 from jobfacts.extract.spec import FIELDS, derive_seniority
 from jobfacts.label_app import prefill
+from jobfacts.stats import wilson
 
 RELEVANCE_THRESHOLD = 0.5
 RELEVANCE_EXTRACTOR = "jev_relevance"
@@ -37,22 +38,12 @@ SCORED_FIELDS = [
     "french",
     "min_years",
     "title_level",
+    "contract_type",
     "seniority",
 ]
 
 
 # ----- statistics -------------------------------------------------------------------------
-
-
-def wilson(k: int, n: int, z: float = 1.96) -> tuple[float, float]:
-    """95% Wilson score interval for k successes out of n (0, 1 when n is 0)."""
-    if n == 0:
-        return 0.0, 1.0
-    p = k / n
-    denom = 1 + z * z / n
-    centre = (p + z * z / (2 * n)) / denom
-    half = z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n)) / denom
-    return max(0.0, centre - half), min(1.0, centre + half)
 
 
 def cell(k: int, n: int) -> str:
@@ -63,6 +54,19 @@ def cell(k: int, n: int) -> str:
 
 
 # ----- scoring ----------------------------------------------------------------------------
+
+
+def is_labelled(label: dict, field: str) -> bool:
+    """False when the label has no value for the field: absent (field added after the posting
+    was labelled) or null (reference label with no majority and no review decision)."""
+    if field == "relevant":
+        return label.get("relevant") is not None
+    if field in ("office_cantons", "office_places"):
+        return label.get("office_cantons") is not None
+    if field == "seniority":
+        return is_labelled(label, "min_years") and is_labelled(label, "title_level")
+    entry = label["fields"].get(field)
+    return entry is not None and entry["value"] is not None
 
 
 def label_value(label: dict, field: str):
@@ -98,7 +102,7 @@ def score_records(
     (extractor, field -> labelled postings without any extraction row).
     """
     records: list[dict] = []
-    counts: dict = {"unsure": 0, "missing": Counter(), "labelled": 0}
+    counts: dict = {"unsure": 0, "null": 0, "missing": Counter(), "labelled": 0}
     for item in items:
         pid = item["posting_id"]
         label = labels.get(pid)
@@ -113,6 +117,8 @@ def score_records(
         }
         if label["relevant"] == "unsure":
             counts["unsure"] += 1
+        elif label["relevant"] is None:
+            counts["null"] += 1
         elif pid in relevance:
             ok = (relevance[pid] >= RELEVANCE_THRESHOLD) == (label["relevant"] == "true")
             records.append(
@@ -127,6 +133,8 @@ def score_records(
         for extractor, by_pid in exts.items():
             ext = by_pid.get(pid)
             for field in SCORED_FIELDS[1:]:
+                if not is_labelled(label, field):
+                    continue  # unlabelled: added after this posting was labelled, or null
                 if ext is None:
                     counts["missing"][extractor] += 1
                     break
@@ -178,7 +186,9 @@ def evidence_agreement(
             if ext is None or ext["error"]:
                 continue
             for name, spec in FIELDS.items():
-                lab = label["fields"][name]
+                lab = label["fields"].get(name)
+                if lab is None or lab["value"] is None:
+                    continue
                 if ext["values"][name] != lab["value"] or lab["value"] in spec.no_quote:
                     continue
                 hit = bool(set(ext["sentences"].get(name, [])) & set(lab["sentences"]))
@@ -208,7 +218,7 @@ def confusion(
     for item in items:
         label = labels.get(item["posting_id"])
         ext = by_pid.get(item["posting_id"])
-        if label is None or ext is None:
+        if label is None or ext is None or not is_labelled(label, field):
             continue
         out[
             (label["fields"][field]["value"], "ERROR" if ext["error"] else ext["values"][field])
@@ -242,7 +252,7 @@ def calibration(
         for name in FIELDS:
             d = ext["details"].get(name)
             value = ext["values"][name]
-            if not d:
+            if not d or not is_labelled(label, name):
                 continue
             ok = value == label["fields"][name]["value"]
             for key, x in (
@@ -300,6 +310,8 @@ def prefill_agreement(
         for name in FIELDS:
             if name not in pre["fields"]:
                 none[mode] += 1
+                continue
+            if name not in label["fields"]:
                 continue
             out[(name, mode)][0] += pre["fields"][name]["value"] == label["fields"][name]["value"]
             out[(name, mode)][1] += 1
@@ -381,7 +393,9 @@ def section_accuracy(records, items, extractors, counts) -> str:
     lines = ["## 1. Value accuracy", ""]
     lines.append(
         f"Labelled postings: {counts['labelled']}. Relevance labels `unsure` (excluded from the "
-        f"`relevant` rows): {counts['unsure']}. Cells show accuracy, the 95% Wilson interval "
+        f"`relevant` rows): {counts['unsure']}. Keys without a reference value (no majority, "
+        f"not yet reviewed; skipped): {counts['null']} relevance, others per field. Cells show "
+        "accuracy, the 95% Wilson interval "
         "in brackets, and n. Errors count as wrong; the error count is in the last column of "
         "the overall tables.\n"
     )
@@ -519,6 +533,42 @@ def section_order(comparisons) -> str:
     return head + ordertest.render(comparisons)
 
 
+def reference_vs_owner(reference: dict[int, dict], owner: dict[int, dict]) -> dict[str, list[int]]:
+    """key -> [agree, compared] over postings labelled by both (null reference keys skipped)."""
+    out: dict[str, list[int]] = {k: [0, 0] for k in [*FIELDS, "office_cantons", "relevant"]}
+    for pid, ref in reference.items():
+        own = owner.get(pid)
+        if own is None:
+            continue
+        for key in out:
+            if not (is_labelled(ref, key) and is_labelled(own, key)):
+                continue
+            if key == "relevant":
+                same = ref["relevant"] == own["relevant"]
+            elif key == "office_cantons":
+                same = set(ref["office_cantons"]) == set(own["office_cantons"])
+            else:
+                same = ref["fields"][key]["value"] == own["fields"][key]["value"]
+            out[key][0] += same
+            out[key][1] += 1
+    return out
+
+
+def section_vs_owner(agreement: dict[str, list[int]]) -> str:
+    lines = [
+        "## 9. Reference versus the owner's own labels",
+        "",
+        "Agreement per key on postings the owner labelled by hand (kept only as a human "
+        "comparison). Different owner sessions saw pre-filled values for later postings.\n",
+    ]
+    rows = [[k, cell(*v)] for k, v in agreement.items()]
+    k = sum(v[0] for v in agreement.values())
+    n = sum(v[1] for v in agreement.values())
+    rows.append(["**all keys**", cell(k, n)])
+    lines.append(table(["key", "agreement"], rows))
+    return "\n".join(lines)
+
+
 def canton_prf(
     items: list[dict], labels: dict[int, dict], by_pid: dict[int, dict]
 ) -> tuple[dict[str, list[int]], int]:
@@ -529,6 +579,8 @@ def canton_prf(
         label = labels.get(item["posting_id"])
         ext = by_pid.get(item["posting_id"])
         if label is None or ext is None or ext["error"] or ext["office_cantons"] is None:
+            continue
+        if not is_labelled(label, "office_cantons"):
             continue
         used += 1
         want, got = set(label["office_cantons"]), set(ext["office_cantons"])
@@ -591,8 +643,18 @@ NOTES = """## Notes on reading this report
   model, so it inherits errors of both parts.
 - Runs made before the canton redesign (`*_v1`) have no `office_cantons`; their office rows
   are skipped.
-- Labels are the owner's judgement, not ground truth; `relevant` is compared with the Jev
+- Labels are the reference's judgement, not ground truth; `relevant` is compared with the Jev
   relevance probability (>= 0.5 means relevant).
+"""
+
+SILVER_NOTES = """- The reference is the majority of three model labellers (gpt, gemini_or, opus),
+  with the owner's decisions on split keys and corrections from the audit applied. A key with no
+  majority and no decision is null and skipped, so n differs per field. The audited error
+  rate (header) is the share of unanimous answers the owner found wrong: model accuracy
+  above that level cannot be told apart from the reference's own noise.
+"""
+
+OWNER_NOTES = """- Reference: the owner's own labels (`--reference owner`).
 """
 
 
@@ -617,11 +679,21 @@ def build_report(
     metas: dict[str, dict],
     relevance: dict[int, float],
     today: str,
+    reference: str = "owner",
+    reference_note: str = "",
+    owner_labels: dict[int, dict] | None = None,
 ) -> str:
     ids = {i["posting_id"] for i in items}
     labels = {p: label for p, label in labels.items() if p in ids}
     extractors = list(exts)
     parts = [f"# Accuracy report ({today})\n", f"Test set: {len(items)} postings.\n"]
+    if reference == "silver":
+        parts.append(
+            "**Reference: silver labels** (majority of three model labellers plus owner review"
+            f"). {reference_note}\n"
+        )
+    else:
+        parts.append("**Reference: the owner's own labels.**\n")
     if labels:
         records, counts = score_records(items, labels, exts, relevance)
         parts.append(section_accuracy(records, items, extractors, counts))
@@ -637,29 +709,50 @@ def build_report(
     parts.append(section_cost(exts, metas))
     if labels:
         parts.append(section_cantons(items, labels, exts, extractors))
-        agreement, none = prefill_agreement(items, labels, exts)
-        parts.append(section_blind(agreement, none))
+        if reference == "owner":
+            agreement, none = prefill_agreement(items, labels, exts)
+            parts.append(section_blind(agreement, none))
     parts.append(section_order(order_comparisons(exts)))
-    parts.append(NOTES)
+    if reference == "silver" and owner_labels is not None:
+        parts.append(section_vs_owner(reference_vs_owner(labels, owner_labels)))
+    parts.append(NOTES + (SILVER_NOTES if reference == "silver" else OWNER_NOTES))
     return "\n".join(parts)
 
 
 def run_evaluate(
-    conn: psycopg.Connection, data_dir: Path, today: str | None = None
+    conn: psycopg.Connection,
+    data_dir: Path,
+    today: str | None = None,
+    reference: str = "silver",
 ) -> tuple[str, Path]:
-    """Read the files in `data_dir`, build the report and write it to `data_dir/reports/`."""
+    """Read the files in `data_dir`, build the report and write it to `data_dir/reports/`.
+
+    `reference` is `silver` (`reference_labels.jsonl`, the model majority) or `owner`
+    (`labels.jsonl`)."""
+    from jobfacts import reference as reference_mod
     from jobfacts.extract.jev import MODEL
     from jobfacts.testset import load_test_set
 
+    if reference not in ("silver", "owner"):
+        raise ValueError("reference must be silver or owner")
     items = load_test_set(data_dir / "test_set.jsonl")
-    labels = labels_mod.latest(data_dir / "labels.jsonl")
+    owner = labels_mod.latest(data_dir / "labels.jsonl")
+    note = ""
+    if reference == "silver":
+        if not (data_dir / reference_mod.REFERENCE_FILE).exists():
+            raise FileNotFoundError("no reference_labels.jsonl: run `jobfacts silver combine`")
+        labels = reference_mod.load_reference(data_dir)
+        note = reference_mod.audit_text(reference_mod.audit_stats(data_dir)).capitalize() + "."
+    else:
+        labels = owner
     run_ids = ordertest.read_runs(data_dir / "test_set_runs.json")
     exts = {name: load_run(conn, rid) for name, rid in run_ids.items()}
     metas = {name: load_run_meta(conn, rid) for name, rid in run_ids.items()}
     relevance = load_relevance(conn, [i["posting_id"] for i in items], MODEL)
     today = today or date.today().isoformat()
-    text = build_report(items, labels, exts, metas, relevance, today)
-    out = data_dir / "reports" / f"accuracy_{today}.md"
+    text = build_report(items, labels, exts, metas, relevance, today, reference, note, owner)
+    suffix = "" if reference == "owner" else "_silver"
+    out = data_dir / "reports" / f"accuracy{suffix}_{today}.md"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(text, encoding="utf-8")
     return text, out

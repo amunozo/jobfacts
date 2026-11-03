@@ -41,7 +41,15 @@ If the stored sentences do not match a fresh split of `description_text` (`offse
 
 ## Modes
 
-- **Blind**: postings with `order` < 30. No model output is sent (`prefill` is null).
+- **Blind**: the first 30 served postings by `order`. No model output is sent (`prefill` is null).
+- **Relevance**: `true` for AI, ML, data-science, data-engineering and research
+  roles; software or infrastructure roles with real ML/AI components (including
+  training infrastructure); product roles on ML/AI products; roles building AI
+  evaluations; web-scraping and analytics engineering. `false` otherwise
+  (business-intelligence and reporting roles, e.g. Power BI, are `false`); `unsure` only when the posting is too vague to tell.
+- **Languages**: only English and French postings are served (`--languages`, default `en,fr`).
+  German postings are labelled by three models and checked by the owner from quotes
+  (see `docs/decisions.md`, 2026-11-03).
 - **Prefilled**: later postings. Each field is pre-filled with the value that at
   least 2 of the 3 extractors agree on, with the sentences chosen by at least 2
   of those; if all three differ, that field has no pre-fill. Model names are
@@ -138,3 +146,104 @@ Response 422, nothing written: `{"errors": {"min_years": "unknown sentence ids [
  "by_language": {"en": {"done": 7, "total": 53}, "de": {"done": 3, "total": 26},
                  "fr": {"done": 2, "total": 21}}}
 ```
+
+## Silver labels by several models
+
+Silver labels for test-set postings: several models label each posting independently with
+the prompt template `prompts/label_posting.md` (language-neutral; the field guide in it is
+`docs/fields.md`). Combining the answers into final labels is a separate step. No command
+here needs the database. Labellers: `gpt` (GPT-6 Astra, pi), `gemini` (Gemini 4 Argon via
+opencode-go, pi), `gemini_or` (Gemini 4 Argon called directly through OpenRouter, max 16000
+output tokens, thinking effort high) and `opus` (answers written by a Claude Code subagent).
+
+Item sets (`--set`, default `pilot`): `pilot` = 12 postings (the first 4 by `order` of each of
+en, de, fr; the English ones include order 0, which the owner labelled), written by
+`pilot-select` to `silver/pilot.json`; `de` = the 26 German postings; `all` = the 100.
+
+```
+uv run jobfacts silver pilot-select                 # write silver/pilot.json
+uv run jobfacts silver render [--set pilot|de|all]  # write the prompts
+uv run jobfacts silver run --labeller gpt [--set S] [--limit N] [--posting ID] [--force]
+uv run jobfacts silver run --labeller gemini_or
+uv run jobfacts silver check --labeller opus        # validate answers written by an agent
+uv run jobfacts silver status                       # valid answers per labeller
+uv run jobfacts silver report [--set S]             # compare labellers, tokens, cost, time
+```
+
+All files are under `data/private/silver/` (git-ignored):
+
+- `pilot.json`: the pilot posting ids.
+- `prompts/<posting_id>.md`: the rendered prompt.
+- `raw/<labeller>/<posting_id>.txt`: raw model text (for opus, the answer is written
+  as `.json` or `.txt` by the other process).
+- `<labeller>/<posting_id>.json`: the valid answer, as `{posting_id, labeller, model,
+  saved_at, prompt_sha256, answer, usage}`; sentence ids are integers (`T` = 0, `L` = -1).
+  `usage` is a list with one entry per attempt (failed ones included):
+  `{input, output, reasoning, cost_usd, duration_ms}`. Opus has none; its usage is given in
+  `usage_opus.json` as `{"total_tokens": N, "duration_ms": N, "postings": N, "note": "..."}`.
+
+`run` calls the model (pi with `--mode json`, no tools, no session, thinking high; or the
+OpenRouter API for `gemini_or`), validates the answer against `jobfacts.extract.spec`
+(all fields including `contract_type` are required), and retries once with the error message
+appended. pi exits 0 when the model call fails, so the JSON events are read: `stopReason ==
+"error"` counts as a failed attempt. Postings that fail twice are listed in the summary and
+left without a stored answer.
+
+`report` writes `data/private/reports/silver_<set>_<date>.md`: per field (and `office_cantons`
+as an exact set, and `relevant`) the share of postings where all labellers agree / a group of
+at least two agrees / all differ, overall and per language; pairwise agreement; low-confidence
+counts; agreement with the owner's labels (latest per posting; fields the owner has not
+labelled are skipped); tokens, cost and time per labeller; retries. It uses the labellers that
+have a valid answer for every posting of the set and lists the others as missing.
+
+### Reference labels: three-model majority and owner review
+
+The reference for scoring the extractors is the majority of three labellers: `gpt`,
+`gemini_or` and `opus` (the panel; plain `gemini` is not in it). The owner's own labels
+(`data/private/labels.jsonl`) are kept as a human comparison.
+
+```
+uv run jobfacts silver combine --set all        # -> data/private/reference_labels.jsonl
+uv run jobfacts silver review-sheet [--audit N] # -> data/private/silver/review_sheet.md
+uv run jobfacts silver review-apply FILE        # store the owner's decisions
+uv run jobfacts evaluate [--reference silver|owner]   # default silver
+```
+
+`combine` writes one record per posting that all three labellers answered, in the shape of
+an owner label (`fields: {name: {value, sentences}}`, `office_cantons`,
+`office_cantons_sentences`, `office_places` filled by code for the cantons, `relevant`),
+`labeller: "silver"` and `models`, plus per key:
+
+- `support`: `3/3`, `2/3` or `split`. Majority = at least two equal answers
+  (`office_cantons` compared as a set).
+- `votes`: each labeller's value; `low_confidence`: the labellers that marked the key low.
+- Sentences come from Opus when Opus is in the majority, otherwise from the first majority
+  labeller (order gpt, gemini_or). A split key has value `null` (and `splits` lists it).
+  Evaluation skips null keys, so `n` differs per field until the owner has decided them.
+- `reviewed`: keys decided or checked by the owner (`decided`, `corrected`, `confirmed`).
+
+Owner review is done in chat, without a terminal UI. `review-sheet` writes numbered items:
+every unresolved split key, plus an audit sample of 30 unanimous (posting, key) pairs,
+drawn uniformly with the fixed seed 20261103 and never repeating a key that was on an
+earlier sheet (`silver/review_items.json` records every item handed out, with its number).
+Items still undecided stay on the next sheet with the same number, and a new sample is
+drawn only when no earlier audit item is waiting. Each item shows the posting id, language,
+title, the candidate values with who said what, the allowed values, and the cited sentences
+in the original language with the labellers' English translation.
+
+The decisions file (JSON lines or one JSON list) has one line per answered item:
+`{"item": 7, "posting_id": 1234, "key": "german", "verdict": "ok"|"wrong", "value": ...}`.
+`posting_id` and `key` are optional (taken from the item and checked if present). `value`
+is required for split items and for `wrong`, and is checked against the allowed values
+(`office_cantons`: a list). `review-apply` is all or nothing and appends to
+`silver/review_decisions.jsonl`; the latest decision per key wins. Run `combine` again to
+apply them: a decided value overrides the majority, and takes its sentences from a labeller
+that gave the same value (none otherwise).
+
+The audit estimates the error rate of the reference: `silver report` has an "Audit" section
+with k of n audited unanimous answers correct and a 95% Wilson interval (overall and per
+key, where n allows) and the number of split keys resolved. `evaluate` in silver mode names
+the reference and its audited error rate in the header, skips blind-vs-prefilled (an
+owner-only comparison), and adds a section comparing the reference with the owner's own
+labels per key. The silver report is written to `accuracy_silver_<date>.md`, the owner one to
+`accuracy_<date>.md`.

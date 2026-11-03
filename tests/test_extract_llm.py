@@ -12,6 +12,7 @@ def reply(**overrides):
         "french": {"value": "not_mentioned", "sentences": []},
         "min_years": {"value": 3, "sentences": ["S003"]},
         "title_level": {"value": "senior", "sentences": ["T"]},
+        "contract_type": {"value": "not_stated", "sentences": []},
         "office_cantons": {"value": ["ZH"], "sentences": ["L"]},
     }
     base.update(overrides)

@@ -21,12 +21,12 @@ LOCATION_ID = -1
 LANGUAGE_VALUES = {
     "not_mentioned": "The posting says nothing about this language being needed or wanted.",
     "required_fluent": (
-        "Required at a high level: C1, C2, native, fluent, excellent, business fluent, "
+        "Required at a high level: C1, C2, native, fluent, excellent, very good, business fluent, "
         "verhandlungssicher, fliessend, courant."
     ),
     "required_intermediate": (
-        "Required below fluent: A2-B2, good, working knowledge, gute Kenntnisse, "
-        "bonnes connaissances."
+        "Required below fluent: A2-B2, good, working knowledge, good school grades, "
+        "gute Kenntnisse, bonnes connaissances."
     ),
     "required_level_not_stated": (
         'Required, but no level is given: "German required", "Deutsch ist ein Muss".'
@@ -35,7 +35,10 @@ LANGUAGE_VALUES = {
         "One of several languages is required and any of them is enough, for example "
         '"fluent in German or French" (then both german and french get this value).'
     ),
-    "nice_to_have": ("Wanted but not required: plus, advantage, preferred, von Vorteil, un atout."),
+    "nice_to_have": (
+        "Wanted but not required: plus, advantage, preferred, von Vorteil, un atout; "
+        "also 'English and/or French' for French."
+    ),
 }
 
 
@@ -76,10 +79,22 @@ FIELDS: dict[str, Field] = {
             "work_mode",
             "Where is the work done: at the office, partly at home, or fully remote?",
             {
-                "not_stated": "The posting does not say.",
-                "onsite": "Work at the office every day.",
-                "hybrid": "Part office, part home.",
-                "remote": "Fully remote (occasional travel or offsites still count as remote).",
+                "not_stated": (
+                    "The posting does not say. An office location alone, with nothing "
+                    "said about home or remote working, is not_stated."
+                ),
+                "onsite": (
+                    "Work at the office (also 'primarily on site', 'office-first', or fixed "
+                    "days at several offices)."
+                ),
+                "hybrid": (
+                    "Part office, part home (also when home working appears only as a "
+                    "benefit, or as a tag such as #LI-HYBRID)."
+                ),
+                "remote": (
+                    "Fully remote, or remote offered as an option (occasional travel or "
+                    "offsites still count as remote)."
+                ),
             },
             frozenset({"not_stated"}),
         ),
@@ -93,11 +108,12 @@ FIELDS: dict[str, Field] = {
                 ),
                 "allowed": (
                     "Remote, and the posting names Switzerland as allowed, or says anywhere "
-                    "in the world."
+                    "in the world or globally (this wins over a list of countries)."
                 ),
                 "unclear": (
                     'Remote, but the region is only "Europe", "EU", "EMEA", a time zone '
-                    "(for example CET) or similar, without naming Switzerland."
+                    "(for example CET), 'choose where you live', or a country list with EMEA, "
+                    "without naming Switzerland."
                 ),
                 "not_allowed": (
                     "Remote, but the posting lists countries without Switzerland, or allows "
@@ -110,20 +126,44 @@ FIELDS: dict[str, Field] = {
         _language("french", "French"),
         Field(
             "min_years",
-            "What is the minimum number of years of experience the posting requires?",
+            "What is the minimum number of years of experience the posting asks for (preferred "
+            "or nice-to-have years count too)? A degree is never converted into years; a range "
+            "or alternatives give the lowest number; separate requirements that all apply give "
+            "the highest.",
             _YEARS,
             frozenset({"not_stated"}),
         ),
         Field(
             "title_level",
-            "What seniority level does the job TITLE itself state?",
+            "What seniority level does the job TITLE itself state? A range in the title "
+            "(for example 'Confirmé à Sénior') gives the lower level.",
             {
-                "not_stated": "The title states no level.",
-                "internship": "Internship, working student, thesis.",
-                "junior": "A junior, graduate or entry-level title.",
+                "not_stated": "The title states no level ('Founding' is not a level).",
+                "internship": "Internship, apprenticeship, working student, thesis.",
+                "junior": "A junior, graduate, entry-level or associate title.",
                 "mid": 'A mid-level title (for example "Engineer II").',
                 "senior": "A senior title.",
-                "staff_principal": "A staff, principal, lead or head-of title.",
+                "staff_principal": (
+                    "A staff, principal, lead, head-of, team-lead (Teamleiter) or plain "
+                    "'Manager' title (not Projektleiter or Testleiter)."
+                ),
+            },
+            frozenset({"not_stated"}),
+        ),
+        Field(
+            "contract_type",
+            "Is the position permanent (open-ended) or fixed-term?",
+            {
+                "not_stated": (
+                    "The posting does not say. An internship is not assumed to be fixed-term."
+                ),
+                "permanent": (
+                    "Open-ended: unbefristet, CDI, permanent position, unbefristete Anstellung."
+                ),
+                "fixed_term": (
+                    "An end date or limited duration is stated: befristet, CDD, 12-month "
+                    "contract, maternity cover, temporary staffing, or employment type 'Contract'."
+                ),
             },
             frozenset({"not_stated"}),
         ),
@@ -139,7 +179,9 @@ GENERAL_RULES = (
 
 RELEVANCE_QUESTION = (
     "Is this a role whose main work is AI, machine learning, data science, data "
-    "engineering, data analytics, or research?"
+    "engineering, data analytics, or research, or a software, infrastructure or product "
+    "role built around ML/AI? Business-intelligence and reporting roles (dashboards, "
+    "Power BI) do not count."
 )
 
 # office_cantons: not a one-value field. The model picks any number of canton codes (and
@@ -152,7 +194,7 @@ OFFICE_CANTONS_QUESTION = (
 )
 _NOT_REASONS = (
     "Answer no if the place is only mentioned for other reasons (company history, "
-    "customers, other roles, travel)."
+    "customers, other roles, travel) or is only a planned future office."
 )
 CANTON_QUESTION = (
     "Does the posting name an office or work location for this role in canton {name} "

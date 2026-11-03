@@ -51,6 +51,93 @@ def _search(conn, args) -> int:
     return 0
 
 
+def _reference(args, data_dir) -> int:
+    from jobfacts import reference
+
+    if args.action == "combine":
+        s = reference.combine(data_dir, args.set)
+        print(f"wrote {s['written']} postings to {s['path']}; support {s['support']}")
+        if s["missing"]:
+            print(f"not yet answered by all three labellers: {len(s['missing'])} postings")
+        print(f"keys decided by review: {s['reviewed']}; unresolved splits: {s['unresolved']}")
+    elif args.action == "review-sheet":
+        s = reference.review_sheet(data_dir, args.set, args.audit)
+        print(
+            f"{s['path']}: {s['splits']} split keys, {s['audit']} audit keys "
+            f"({s['new']} new); postings not answered by all three: {s['incomplete']}"
+        )
+    else:
+        if not args.file:
+            print("review-apply needs the decisions file")
+            return 2
+        try:
+            s = reference.review_apply(data_dir, args.file)
+        except ValueError as e:
+            print(f"nothing stored: {e}")
+            return 2
+        print(f"stored {s['stored']} decisions in {s['path']}; run `silver combine` to apply")
+    return 0
+
+
+def _silver(args) -> int:
+    from jobfacts import silver
+    from jobfacts.testset import PRIVATE_DIR
+
+    data_dir = args.data_dir or PRIVATE_DIR
+    if args.action == "pilot-select":
+        ids = silver.pilot_select(data_dir)
+        print(f"pilot set: {len(ids)} postings {ids} -> {data_dir / 'silver' / silver.PILOT_FILE}")
+        return 0
+    try:
+        silver.items_for(data_dir, args.set)  # fails early when the pilot is not selected
+    except ValueError as e:
+        print(e)
+        return 2
+    if args.action == "render":
+        n = silver.render_all(data_dir, args.set)
+        print(f"wrote {n} prompts to {data_dir / 'silver' / 'prompts'}")
+        return 0
+    if args.action == "status":
+        counts = silver.status(data_dir, args.set)
+        total = counts.pop("total")
+        for lab, n in counts.items():
+            print(f"{lab}: {n}/{total} valid answers")
+        return 0
+    if args.action in ("combine", "review-sheet", "review-apply"):
+        return _reference(args, data_dir)
+    if args.action == "report":
+        from jobfacts import silver_report
+
+        path, _text, summary = silver_report.write_report(data_dir, args.set)
+        print(f"set {summary['set']}: {summary['n']} postings; compared: {summary['labellers']}")
+        if summary["missing"]:
+            print(f"missing: {summary['missing']}")
+        if "all_agree" in summary:
+            print(f"all labellers agree on {100 * summary['all_agree']:.0f}% of the answers")
+            for pair, share in summary["pairwise"].items():
+                print(f"  {pair}: {100 * share:.0f}%")
+        print(f"report: {path}")
+        return 0
+    if not args.labeller:
+        print("--labeller is required for run and check")
+        return 2
+    if args.action == "run":
+        s = silver.run_labeller(
+            args.labeller,
+            data_dir,
+            limit=args.limit,
+            posting_id=args.posting,
+            force=args.force,
+            set_name=args.set,
+        )
+    else:
+        s = silver.check_labeller(args.labeller, data_dir, args.set)
+    print(", ".join(f"{k} {len(v)}" for k, v in s.items()))
+    for pid, reason in s["failed"].items():
+        print(f"  failed {pid}: {reason[:300]}")
+    return 1 if s["failed"] else 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="jobfacts")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -95,14 +182,51 @@ def main(argv: list[str] | None = None) -> int:
     lab.add_argument(
         "--data-dir", type=Path, help="folder with test_set.jsonl (default data/private)"
     )
+    lab.add_argument(
+        "--languages", default="en,fr", help="posting languages to label (default en,fr)"
+    )
     ev = sub.add_parser("evaluate", help="write the accuracy report (Markdown) from the labels")
     ev.add_argument("--data-dir", type=Path, help="folder with the test set (default data/private)")
+    ev.add_argument(
+        "--reference",
+        choices=["silver", "owner"],
+        default="silver",
+        help="labels to score against: silver = model majority (default), owner = own labels",
+    )
     oo = sub.add_parser(
         "jev-order-test", help="run Jev with reversed and shuffled options on the test set"
     )
     oo.add_argument("--data-dir", type=Path, help="folder with the test set (default data/private)")
     oo.add_argument("--force", action="store_true", help="rerun variants that already have a run")
+    sil = sub.add_parser("silver", help="silver labels by several models (no database)")
+    sil.add_argument(
+        "action",
+        choices=[
+            "pilot-select",
+            "render",
+            "run",
+            "check",
+            "status",
+            "report",
+            "combine",
+            "review-sheet",
+            "review-apply",
+        ],
+    )
+    sil.add_argument("file", nargs="?", type=Path, help="decisions file (review-apply)")
+    sil.add_argument("--audit", type=int, default=30, help="audit sample size (review-sheet)")
+    sil.add_argument("--set", choices=["pilot", "de", "all"], default="pilot")
+    sil.add_argument(
+        "--data-dir", type=Path, help="folder with the test set (default data/private)"
+    )
+    sil.add_argument("--labeller", choices=["gpt", "gemini", "gemini_or", "opus"])
+    sil.add_argument("--limit", type=int)
+    sil.add_argument("--posting", type=int, help="only this posting id")
+    sil.add_argument("--force", action="store_true", help="relabel postings that have an answer")
     args = parser.parse_args(argv)
+
+    if args.command == "silver":
+        return _silver(args)
 
     with db.connect() as conn:
         if args.command == "migrate":
@@ -126,16 +250,26 @@ def main(argv: list[str] | None = None) -> int:
             from jobfacts.label_app.server import serve
             from jobfacts.testset import PRIVATE_DIR
 
-            serve(args.port, args.data_dir or PRIVATE_DIR)
+            langs = tuple(x.strip() for x in args.languages.split(",") if x.strip())
+            serve(args.port, args.data_dir or PRIVATE_DIR, langs)
             return 0
         if args.command == "evaluate":
-            from jobfacts import labels
+            from jobfacts import labels, reference
             from jobfacts.evaluate import run_evaluate, summary_lines
             from jobfacts.testset import PRIVATE_DIR
 
             data_dir = args.data_dir or PRIVATE_DIR
-            text, path = run_evaluate(conn, data_dir)
-            print(summary_lines(text, len(labels.latest(data_dir / "labels.jsonl"))))
+            try:
+                text, path = run_evaluate(conn, data_dir, reference=args.reference)
+            except FileNotFoundError as e:
+                print(e)
+                return 2
+            n_labels = len(
+                reference.load_reference(data_dir)
+                if args.reference == "silver"
+                else labels.latest(data_dir / "labels.jsonl")
+            )
+            print(summary_lines(text, n_labels))
             print(f"\nreport: {path}")
             return 0
         if args.command == "jev-order-test":

@@ -227,3 +227,17 @@ def test_order_compare():
     assert r["german"]["directions"] == {"value_to_neutral": 1}
     assert r["office_cantons"]["directions"] == {"removed": 1}
     assert "work_mode" in ordertest.render({"reversed": r})
+
+
+def test_label_without_contract_type_is_unlabelled_not_a_crash():
+    old = label(1)
+    del old["fields"]["contract_type"]
+    labels = {1: old}
+    exts = {"m": {1: ext()}}
+    records, _ = ev.score_records([item(1)], labels, exts, {})
+    fields = {r["field"] for r in records}
+    assert "contract_type" not in fields and "work_mode" in fields and "seniority" in fields
+    assert ev.confusion([item(1)], labels, exts["m"], "contract_type") == {}
+    agreement = ev.evidence_agreement([item(1)], labels, exts)
+    assert ("contract_type", "m") not in agreement
+    assert ev.calibration([item(1)], labels, {1: ext(details={"contract_type": {"confidence": 1}})})

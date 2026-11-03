@@ -26,7 +26,11 @@ def majority(by_model: dict[str, Extraction]) -> dict:
     """`by_model` maps extractor name to its extraction. Returns the pre-fill (may be empty)."""
     fields: dict[str, dict] = {}
     for name in FIELDS:
-        votes = [(e["values"][name], e["sentences"].get(name, [])) for e in by_model.values()]
+        votes = [
+            (e["values"][name], e["sentences"].get(name, []))
+            for e in by_model.values()
+            if e["values"].get(name) is not None  # runs made before a field existed
+        ]
         count = Counter(v for v, _ in votes)
         if not count:
             continue

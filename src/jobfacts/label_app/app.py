@@ -1,6 +1,7 @@
 """The labelling API (JSON). The UI in `static/` only talks to these endpoints.
 
-Documented in docs/labelling.md. Blind mode (the first BLIND_COUNT postings by `order`) shows no
+Documented in docs/labelling.md. Blind mode (the first BLIND_COUNT of the served postings by
+`order`, so excluding a language keeps 30 blind postings) shows no
 model output; later postings come pre-filled with the three-extractor majority (model names are
 never sent).
 """
@@ -72,8 +73,10 @@ def create_app(
     by_id = {it["posting_id"]: it for it in items}
     extractions = extractions or {}
 
+    blind_ids = {it["posting_id"] for it in sorted(items, key=lambda x: x["order"])[:blind_count]}
+
     def mode_of(item: dict) -> str:
-        return "blind" if item["order"] < blind_count else "prefilled"
+        return "blind" if item["posting_id"] in blind_ids else "prefilled"
 
     def posting_text(item: dict) -> PostingText:
         return PostingText.build(

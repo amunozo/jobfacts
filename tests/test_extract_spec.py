@@ -26,6 +26,7 @@ def _table_values(text: str) -> list[str]:
         ("german", "## 2. Language requirement"),
         ("french", "## 2. Language requirement"),
         ("title_level", "## 3. `seniority`"),
+        ("contract_type", "## 4. `contract_type`"),
     ],
 )
 def test_table_values_match_fields_md(field, heading):

@@ -215,3 +215,56 @@ Newest at the bottom.
 - **Rejected for now:** keeping the original HTML for real formatting. It
   needs a new column and a re-collect, and it would change the text the test
   set is built on (listed under README "Later").
+
+## 2026-11-03: German postings labelled by three models, checked from quotes
+- **What:** the owner labels English and French on the labelling page (it
+  now serves only `en,fr`; the 30 blind postings are the first 30 served).
+  The 26 German test postings are labelled independently by Opus 5.5 (Claude
+  Code subagent), GPT-6 Astra (pi) and Gemini 4 Argon
+  (pi, opencode-go). Each gives value, sentence ids and an English
+  translation of those sentences. All agree: accepted, ~20% spot-checked.
+  Two agree: owner reviews from quote + translation. All differ: owner
+  decides or the field is "uncertain" and not scored.
+- **Why:** the owner's German is not enough to label full postings, but is
+  enough to check a short quote with a translation. Three model families
+  catch errors that two agreeing models would share. None of the three is
+  an extractor under test (Jev, DeepSeek, Mistral), so no model grades
+  itself. Labels record the labellers and whether the owner checked them;
+  German accuracy is reported separately as model-labelled ("silver").
+- **Rejected:** Opus alone (no check on its mistakes); two models with a
+  third only as tie-breaker (misses errors the two share; at 26 postings
+  the full third run costs almost nothing); owner labelling German alone.
+
+## 2026-11-03: Add contract_type
+- **What:** a new extraction field `contract_type` with `permanent`,
+  `fixed_term` and `not_stated` (nothing assumed; an internship is not taken
+  to be fixed-term). Same rules as the other fields: one allowed value, a
+  supporting sentence unless `not_stated`.
+- **Why:** the owner filters out fixed-term roles. It is cheapest to add now,
+  before labelling starts: the labelling page, the extractors and the report
+  all read the field list from the spec. The one early label (posting order
+  0) has no value; it counts as unlabelled for this field.
+- **Rejected:** adding it later (the 100 test postings would have to be
+  labelled again, and the three extractors rerun after labels exist).
+
+## 2026-11-03: Reference labels by three-model majority
+- **What:** the reference labels of the 100-posting test set are the
+  majority of three model labellers: GPT-6 Astra (pi), Gemini 4 Argon
+  (OpenRouter) and Claude Opus 5.5. The owner reviews only the keys where
+  all three differ, plus a random audit of 30 unanimous answers (fixed
+  seed) to measure the error rate of the reference. The owner's own labels
+  (about 7-10 postings) stay as a human comparison, and `evaluate` scores
+  against the model reference by default (`--reference owner` keeps the old
+  mode). Rules were tightened first (worldwide beats a country list;
+  "Founding" is not a level; ranges take the lower end; planned offices
+  do not count; "very good" = fluent; BI roles not relevant).
+- **Why:** in a pilot of 12 postings the three models agreed on 97% of the
+  answers and matched the owner's labels on 95-96%; the two misses they
+  shared were an owner mislabel and an open rule question. Owner time is
+  the scarce resource, and the audit shows how much the reference can be
+  trusted instead of assuming it.
+- **Rejected:** the owner labels all 100 by hand (slow, and error-prone:
+  one of the pilot disagreements was the owner's own mistake); one model
+  only (no error signal at all); two models (more owner review for little
+  gain: every disagreement would need the owner, and two models cannot
+  outvote each other).
