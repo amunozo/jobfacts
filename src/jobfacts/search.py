@@ -32,6 +32,7 @@ EVIDENCE_FIELDS = [
     "french",
     "min_years",
     "title_level",
+    "contract_type",
 ]
 
 
@@ -49,6 +50,7 @@ class Filters:
     german_max: str | None = None
     french_max: str | None = None
     show_unclear_language: bool = False
+    no_fixed_term: bool = False
     seniority: list[str] = field(default_factory=list)
     new_days: int | None = None
     limit: int = 20
@@ -73,7 +75,8 @@ class Filters:
             raise SearchError("--limit must be at least 1")
 
 
-# The latest successful Jev extraction of each relevant, open board posting.
+# The latest successful Jev extraction of each relevant, open board posting; extractions
+# from search runs win over experiment runs (a later experiment must not change the results).
 _BASE = """
 FROM postings p
 JOIN employers emp ON emp.id = p.employer_id
@@ -81,7 +84,7 @@ JOIN relevance rel ON rel.posting_id = p.id AND rel.model = %(rel_model)s AND re
 JOIN LATERAL (
     SELECT e.* FROM extractions e JOIN extraction_runs r ON r.id = e.run_id
     WHERE e.posting_id = p.id AND r.extractor = 'jev' AND e.error IS NULL
-    ORDER BY e.run_id DESC LIMIT 1
+    ORDER BY (r.purpose = 'search') DESC, e.run_id DESC LIMIT 1
 ) x ON true
 """
 
@@ -117,6 +120,8 @@ def build(f: Filters, with_description: bool = False) -> tuple[str, dict]:
         if maximum is not None:
             where.append(f"x.{column} = ANY(%({column}_values)s)")
             params[f"{column}_values"] = _language_values(maximum, f.show_unclear_language)
+    if f.no_fixed_term:  # not_stated counts as permanent; NULL = extracted before the field
+        where.append("x.contract_type IS DISTINCT FROM 'fixed_term'")
     if f.seniority:
         where.append("x.seniority = ANY(%(seniority)s)")
         params["seniority"] = f.seniority
@@ -135,7 +140,7 @@ def build(f: Filters, with_description: bool = False) -> tuple[str, dict]:
 
     columns = (
         "p.id, p.title, emp.name, p.url, p.first_seen_at, x.office_cantons, x.office_places, "
-        "x.work_mode, x.remote_from_switzerland, x.german, x.french, x.seniority, "
+        "x.work_mode, x.remote_from_switzerland, x.german, x.french, x.seniority, x.contract_type, "
         f"{rank} AS rank, count(*) OVER () AS total"
     )
     if with_description:
@@ -159,6 +164,7 @@ class Hit:
     german: str
     french: str
     seniority: str
+    contract_type: str | None
     rank: float
     evidence: dict[str, list[str]] | None = None
 
@@ -184,6 +190,7 @@ class Hit:
             "german": self.german,
             "french": self.french,
             "seniority": self.seniority,
+            "contract_type": self.contract_type,
             "rank": self.rank,
         }
         if self.evidence is not None:
@@ -224,6 +231,7 @@ def search(conn: psycopg.Connection, f: Filters, evidence: bool = False) -> tupl
                 row["german"],
                 row["french"],
                 row["seniority"],
+                row["contract_type"],
                 float(row["rank"]),
                 _evidence(row) if evidence else None,
             )

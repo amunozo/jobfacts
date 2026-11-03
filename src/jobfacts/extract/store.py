@@ -70,16 +70,18 @@ def finish_run(conn: psycopg.Connection, run_id: int) -> None:
     conn.commit()
 
 
-def pending_search_ids(conn: psycopg.Connection, ids: list[int]) -> list[int]:
+def pending_search_ids(conn: psycopg.Connection, ids: list[int], spec_version: str) -> list[int]:
     """Of these postings, the open board ones without a successful extraction made in a
-    search run for their current content_hash (new, changed, or failed before)."""
+    search run, with this spec_version, for their current content_hash (new, changed,
+    failed before, or extracted under older rules)."""
     rows = conn.execute(
         "SELECT p.id FROM postings p WHERE p.id = ANY(%s) AND p.closed_at IS NULL "
         "AND p.origin = 'board' AND NOT EXISTS ("
         " SELECT 1 FROM extractions e JOIN extraction_runs r ON r.id = e.run_id"
-        " WHERE e.posting_id = p.id AND r.purpose = 'search' AND e.error IS NULL"
+        " WHERE e.posting_id = p.id AND r.purpose = 'search' AND r.spec_version = %s"
+        " AND e.error IS NULL"
         " AND e.content_hash = p.content_hash) ORDER BY p.id",
-        (ids,),
+        (ids, spec_version),
     )
     return [r[0] for r in rows]
 

@@ -29,6 +29,7 @@ def _search(conn, args) -> int:
         german_max=args.german_max,
         french_max=args.french_max,
         show_unclear_language=args.show_unclear_language,
+        no_fixed_term=args.no_fixed_term,
         seniority=_csv(args.seniority),
         new_days=args.new_days,
         limit=args.limit,
@@ -168,6 +169,9 @@ def main(argv: list[str] | None = None) -> int:
         "--show-unclear-language",
         action="store_true",
         help="keep 'required, level not stated' when a max below fluent is set",
+    )
+    sea.add_argument(
+        "--no-fixed-term", action="store_true", help="drop postings with a fixed-term contract"
     )
     sea.add_argument("--seniority", help="comma-separated, e.g. junior,mid")
     sea.add_argument("--new-days", type=int, help="first seen in the last N days")

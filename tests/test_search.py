@@ -351,3 +351,55 @@ def test_incremental_extraction_skips_unchanged_and_application_postings(conn, s
     conn.execute("UPDATE postings SET content_hash = 'changed' WHERE id = %s", (b,))
     _, third = run_extraction(conn, Fake(), ids_, for_search=True)
     assert len(third) == 1
+    # new extraction rules (spec version) redo everything
+    Fake.spec_version = lambda self: "v2"
+    _, fourth = run_extraction(conn, Fake(), ids_, for_search=True)
+    assert len(fourth) == 2
+    _, fifth = run_extraction(conn, Fake(), ids_, for_search=True)
+    assert fifth == []
+    assert store.pending_search_ids(conn, ids_, "v3") == sorted([a, b])
+
+
+@pytest.mark.db
+def test_no_fixed_term_keeps_permanent_not_stated_and_old_rows(conn, seed):
+    seed.add(title="fixed", contract_type="fixed_term")
+    seed.add(title="perm", contract_type="permanent")
+    seed.add(title="unknown", contract_type="not_stated")
+    old = seed.add(title="old")
+    conn.execute("UPDATE extractions SET contract_type = NULL WHERE posting_id = %s", (old,))
+    assert ids(conn) == {"fixed", "perm", "unknown", "old"}
+    assert ids(conn, no_fixed_term=True) == {"perm", "unknown", "old"}
+
+
+@pytest.mark.db
+def test_contract_type_in_json_and_evidence(conn, seed):
+    seed.add(title="fixed", contract_type="fixed_term")
+    hits, _ = search.search(conn, Filters(), evidence=True)
+    assert hits[0].as_dict()["contract_type"] == "fixed_term"
+    assert "contract_type" in hits[0].evidence
+
+
+@pytest.mark.db
+def test_search_run_extraction_wins_over_newer_experiment_run(conn, seed):
+    pid = seed.add(title="p", cantons=("ZH",))
+    conn.execute("UPDATE extraction_runs SET purpose = 'search'")
+    exp = store.create_run(conn, "jev", jev.MODEL, "v-exp")
+    store.save_extraction(
+        conn,
+        exp,
+        pid,
+        Result(
+            values={
+                "work_mode": "onsite",
+                "remote_from_switzerland": "not_applicable",
+                "german": "not_mentioned",
+                "french": "not_mentioned",
+                "min_years": "not_stated",
+                "title_level": "not_stated",
+                "contract_type": "not_stated",
+            },
+            office_cantons=["BE"],
+        ),
+    )
+    assert ids(conn, cantons=["ZH"]) == {"p"}
+    assert ids(conn, cantons=["BE"]) == set()

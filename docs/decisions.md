@@ -279,3 +279,16 @@ Newest at the bottom.
   position above senior; treating it as a rank would let those roles pass a
   seniority filter they do not belong to.
 - **Rejected:** every "Manager" title as `staff_principal` (the earlier rule).
+
+## 2026-11-03: Jev extracts postings for search
+- **What:** Jev (jev-1.14.0) is the extraction model for search.
+- **Why:** against the three-model reference (100 postings) Jev and DeepSeek
+  tie on average (~95%; German 93.8 vs 93.6, French 97.5 vs 97.0). Jev is
+  better on work mode (German 26/26 vs 21/26) and remote; DeepSeek on
+  title level (mostly English: 98% vs 85%) and office cantons. Jev costs a
+  third as much ($0.0004 vs $0.0013 per posting), is about 6x faster, and
+  its quotes are chosen sentences by construction, so they cannot be
+  invented.
+- **Rejected:** DeepSeek (no clear accuracy gain for 3x the cost); a mix
+  per field (best numbers, but two extractors to run and maintain);
+  Mistral (clearly worse: ~80% on German postings).

@@ -13,7 +13,9 @@ Application postings, closed postings and postings without a successful extracti
 
 `extract --for-search` starts a run marked `purpose = 'search'`. It skips postings that
 already have a successful search-run extraction for their current `content_hash`, so
-only new, changed or previously failed postings are read.
+only new, changed or previously failed postings are read. It also redoes postings extracted
+under an older `spec_version` (changed extraction rules). When several extractions exist,
+search shows the latest one, preferring search runs over experiment runs.
 
 ## Query
 
@@ -37,6 +39,7 @@ description matches. Results are ordered by `ts_rank`; with no query, newest fir
 | `--german-max none\|intermediate\|fluent` | Highest German requirement you accept (below). |
 | `--french-max ...` | Same for French. |
 | `--show-unclear-language` | Keep `required_level_not_stated` although the max is below `fluent`. |
+| `--no-fixed-term` | Drop `contract_type = fixed_term`; `permanent`, `not_stated` (counted as permanent) and rows extracted before the field existed stay. |
 | `--seniority junior,mid` | Derived seniority is one of these. |
 | `--new-days N` | First seen in the last N days. |
 | `--limit N` | Rows shown (default 20). The header gives the total. |

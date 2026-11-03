@@ -76,10 +76,11 @@ def run_extraction(
     """Extract and store one run. Without ids: all eligible postings. Returns (run id, results).
 
     for_search: a run that feeds `jobfacts search`; only open board postings that have no
-    successful search-run extraction for their current content are read (incremental)."""
+    successful search-run extraction (current spec version) for their current content are read
+    (incremental)."""
     ids = posting_ids or eligible_ids(conn)
     if for_search:
-        ids = store.pending_search_ids(conn, ids) if ids else []
+        ids = store.pending_search_ids(conn, ids, extractor.spec_version()) if ids else []
     if limit:
         ids = ids[:limit]
     postings = store.load_postings(conn, ids) if ids else []
