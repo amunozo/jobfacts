@@ -268,3 +268,14 @@ Newest at the bottom.
   only (no error signal at all); two models (more owner review for little
   gain: every disagreement would need the owner, and two models cannot
   outvote each other).
+
+## 2026-11-03: "Manager" is a level only when it is a rank
+- **What:** `title_level = staff_principal` for "Manager" used as a rank
+  (plain "Manager", "Manager, X", "Engineering Manager"). A function title
+  (Sales, Key Account, Application, Project, Programmatic Advertising
+  Manager) is `not_stated`. Added after the labelling runs, so the five
+  affected test postings are fixed in the review decisions.
+- **Why:** in sales and project roles "Manager" names the job, not a
+  position above senior; treating it as a rank would let those roles pass a
+  seniority filter they do not belong to.
+- **Rejected:** every "Manager" title as `staff_principal` (the earlier rule).

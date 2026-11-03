@@ -144,8 +144,10 @@ FIELDS: dict[str, Field] = {
                 "mid": 'A mid-level title (for example "Engineer II").',
                 "senior": "A senior title.",
                 "staff_principal": (
-                    "A staff, principal, lead, head-of, team-lead (Teamleiter) or plain "
-                    "'Manager' title (not Projektleiter or Testleiter)."
+                    "A staff, principal, lead, head-of, team-lead (Teamleiter) or "
+                    "'Manager' as a rank ('Manager', 'Manager, X', 'Engineering "
+                    "Manager'). Not a function title such as Sales, Key Account, "
+                    "Application or Project Manager, Projektleiter or Testleiter."
                 ),
             },
             frozenset({"not_stated"}),

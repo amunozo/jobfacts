@@ -134,8 +134,10 @@ except that a staff/principal/lead/head-of title always gives
 `staff_principal`, and an internship title always gives `internship`.
 
 Decided cases (title level): a team or unit lead (Teamleiter, Leiter
-Abteilung) and a plain "Manager" title → `staff_principal`; Projektleiter and
-Testleiter (roles, not ranks) → `not_stated`; "Postdoctoral Researcher" →
+Abteilung) and "Manager" as a rank (plain "Manager", "Manager, X",
+"Engineering Manager") → `staff_principal`; a function title (Sales, Key
+Account, Application, Project or Programmatic Advertising Manager),
+Projektleiter and Testleiter (roles, not ranks) → `not_stated`; "Postdoctoral Researcher" →
 `not_stated`; "Associate" as the lower end of a range → `junior`.
 
 Decided cases (years): years listed as preferred or nice to have still count;
