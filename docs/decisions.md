@@ -374,3 +374,28 @@ Newest at the bottom.
 - **Rejected:** only raising the threshold (it drops good roles first, since the
   false positives score 0.5-0.7 like true ones); copying job_watch's title regexes
   (they also exclude product managers and solutions roles, which the owner wants).
+
+## 2026-11-04: Held-out rule questions (Swisscom home office, rank titles, language check)
+- **What:** (1) "in one of our offices in Switzerland or in home office" is
+  `remote` with `remote_from_switzerland` = `allowed`: the worker chooses. (2) A
+  German or French value is kept only if the posting names that language
+  somewhere (in English, German or French, or "national languages"); otherwise
+  code sets `not_mentioned`. (3) Co-founder, CEO and "Senior Manager" are rank
+  words for `staff_principal`, and code now applies the existing rule "a
+  staff/principal/lead/head-of title always gives `staff_principal`" even when
+  the model chose a lower level or none. Gender tags such as "(m/w/d)" are
+  removed first, because their slash looked like a range ("Senior Manager ...
+  (m/w/d)" became `senior`). (4) Apprenticeships stay under the general rule:
+  `fixed_term` only when a length is stated.
+- **Why:** on the 50-posting held-out set, the 3 Swisscom postings
+  (the sentence appears in about half of Swisscom's ~58 open postings)
+  split GPT and Gemini (hybrid) from Opus and Jev (remote). Jev invented
+  `nice_to_have` for a language the posting never names in 3 postings, once
+  quoting "Home office: up to two days per week". The code before this change only vetoed
+  levels, so it could not correct a missed rank.
+- **Rejected:** checking only the quoted sentence for the language name
+  (correct answers sometimes come without a quote, e.g. "Maîtrise du
+  français"); reading the posting's own language as a requirement (against
+  "no guessing"; the posting language is already a separate value); filling in
+  any level the title names when the model says `not_stated` (only the rank level
+  is forced, since the rules already say a rank title always wins).

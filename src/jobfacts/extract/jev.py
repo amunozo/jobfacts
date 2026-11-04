@@ -42,7 +42,8 @@ RELEVANCE_SENTENCES = 5
 # Bump when code that changes Jev's input or the stored output changes without changing any
 # constant below or in spec.py (sentence splitting, numbering, post-processing, places,
 # seniority). Code cannot be hashed reliably; this number is part of the spec version.
-EXTRACTION_CODE_VERSION = 3  # 3: broader title keywords, fallback to the title level
+EXTRACTION_CODE_VERSION = 4  # 4: gender tags ignored, rank titles win, language must be named
+# (3: broader title keywords, fallback to the title level)
 
 STATE_HEADER = (
     "Job posting. Each line starts with an id: T = title, L = location field of the job "

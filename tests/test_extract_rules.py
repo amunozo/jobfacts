@@ -142,3 +142,97 @@ def test_vetoed_level_falls_back_to_the_level_the_title_names():
     r = Result(values={"title_level": "senior"}, sentences={})
     apply_extraction_rules(p, r)
     assert r.values["title_level"] == "not_stated"
+
+
+@pytest.mark.parametrize(
+    "title,expected",
+    [
+        ("Senior Lead Engineer (m/w/d)", "staff_principal"),
+        ("Junior / Senior Engineer (f/m/d)", "junior"),
+        ("Senior Manager HealthCare Transformation (m/w/d)", "staff_principal"),
+        ("Senior Engineer (H/F)", "senior"),
+        ("Senior Engineer m/w/d", "senior"),
+        ("Senior Engineer (w/m/d)", "senior"),
+        ("Senior Engineer (m/f/x)", "senior"),
+        ("Senior Engineer (f/h)", "senior"),
+        ("Senior Engineer (all genders)", "senior"),
+        ("Senior / Lead Engineer", "senior"),
+        ("Founding Engineer", "not_stated"),
+        ("Founder's Associate", "junior"),
+        ("Senior Data Science Manager", "senior"),
+        ("Member of Technical Staff", "not_stated"),
+        ("Mitgründerin KI", "staff_principal"),
+        ("Cofondatrice IA", "staff_principal"),
+        ("CEO", "staff_principal"),
+    ],
+)
+def test_gender_tags_and_new_rank_words(title, expected):
+    assert title_named_level(title) == expected
+
+
+@pytest.mark.parametrize(
+    "title,model,expected",
+    [
+        ("Senior Manager HealthCare Transformation (m/w/d)", "senior", "staff_principal"),
+        (
+            "AI Infrastructure Co-Founder / CEO (100 % remote) (m/f/d)",
+            "not_stated",
+            "staff_principal",
+        ),
+        ("Senior / Lead Engineer", "senior", "senior"),
+        ("Senior Data Science Manager", "staff_principal", "senior"),
+        ("Member of Technical Staff", "not_stated", "not_stated"),
+    ],
+)
+def test_rank_title_wins(title, model, expected):
+    from jobfacts.extract.base import Result
+    from jobfacts.extract.posting import PostingText
+
+    p = PostingText.build(1, title, "Zurich", "Text here.")
+    r = Result(values={"title_level": model}, sentences={"title_level": [1]})
+    apply_extraction_rules(p, r)
+    assert r.values["title_level"] == expected
+    if model != expected:
+        assert f"title_level {model} -> {expected}" in r.details["rules"]
+        assert r.sentences["title_level"] == []
+
+
+@pytest.mark.parametrize(
+    "text,field,value,expected",
+    [
+        ("Other languages are a plus.", "french", "nice_to_have", "not_mentioned"),
+        ("Any further language is an advantage.", "german", "nice_to_have", "not_mentioned"),
+        ("Weitere Sprachkenntnisse von Vorteil.", "french", "nice_to_have", "not_mentioned"),
+        ("Weitere Landessprachen von Vorteil.", "french", "nice_to_have", "nice_to_have"),
+        ("Weitere Landessprachen von Vorteil.", "german", "nice_to_have", "nice_to_have"),
+        (
+            "Maîtrise du français, à l'oral comme à l'écrit.",
+            "french",
+            "required_fluent",
+            "required_fluent",
+        ),
+        ("Fliessend Deutsch.", "german", "required_fluent", "required_fluent"),
+        ("Fluent French needed.", "french", "required_fluent", "required_fluent"),
+        ("Text here.", "french", "not_mentioned", "not_mentioned"),
+    ],
+)
+def test_language_must_be_named(text, field, value, expected):
+    from jobfacts.extract.base import Result
+    from jobfacts.extract.posting import PostingText
+
+    p = PostingText.build(1, "Data Scientist", "Zurich", text)
+    r = Result(values={field: value}, sentences={field: []})
+    apply_extraction_rules(p, r)
+    assert r.values[field] == expected
+    if value != expected:
+        assert f"{field} {value} -> not_mentioned (language not named)" in r.details["rules"]
+
+
+def test_language_rule_skips_absent_fields():
+    from jobfacts.extract.base import Result
+    from jobfacts.extract.posting import PostingText
+
+    p = PostingText.build(1, "Data Scientist", "Zurich", "Text here.")
+    r = Result(values={"title_level": "not_stated"}, sentences={})
+    apply_extraction_rules(p, r)
+    assert "german" not in r.values and "french" not in r.values

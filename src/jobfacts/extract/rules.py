@@ -3,8 +3,12 @@
 Models read titles and places loosely, so code checks what code can check:
 1. `title_level` is kept only if the title contains a keyword for that level; if not, the
    level the title itself names is used (`title_named_level`), else `not_stated`.
+1b. A title that names `staff_principal` (staff, principal, lead, head of, co-founder, CEO,
+   "senior manager" ...) always gives `staff_principal`, even if the model said less.
 2. A canton the model picked is dropped unless the posting names a place in that canton.
 3. `remote_from_switzerland` is `not_applicable` unless `work_mode` is `remote`.
+4. `german` / `french` are `not_mentioned` unless the posting names the language (or the
+   national languages) somewhere; the whole posting is checked, not only the quoted sentences.
 `title_excluded` is the relevance filter's deterministic title list (see its docstring).
 """
 
@@ -32,7 +36,8 @@ LEVEL_KEYWORDS = {
     r"\bleitung\b|(?:team|bereichs|abteilungs|gruppen|gesch[äa]fts)leitung|\bleitende[rnms]?\b|"
     r"teamleit|chief|direct(?:or|eur|rice)|direktor|\bvp\b|vice president|\bpartner\b|"
     r"^manager\b|engineering manager|\bmanager of\b|responsable d'?[ée]quipe|"
-    r"chef(?:fe)? d'?[ée]quipe",
+    r"chef(?:fe)? d'?[ée]quipe|co[- ]?founder|mitgr[üu]e?nder|mitgruender|"
+    r"co-?fondat(?:eur|rice)|\bceo\b|\bsenior manager\b",
 }
 _LEVEL_RE = {k: re.compile(v, re.IGNORECASE) for k, v in LEVEL_KEYWORDS.items()}
 # "Member of Technical Staff" and "Research Staff" are job names, not ranks.
@@ -42,12 +47,19 @@ _FUNCTION_LEITER = re.compile(r"projektleit|testleit", re.IGNORECASE)
 _RANK_WORD = re.compile(r"teamleit|head|lead\b|principal|staff\b", re.IGNORECASE)
 # Separators that make two level words a range or a set of alternatives ("Confirmé à Sénior").
 _RANGE_SEP = re.compile(r"\s[-–/]\s|/|–|\s(?:to|à|bis|or|oder|ou)\s", re.IGNORECASE)
+# Gender tags such as "(m/w/d)", "(f/m/d)", "(H/F)", "m/w/d", "(all genders)" are not ranges.
+_GENDER_ITEM = r"(?:[mwfdhx]|divers[e]?)"
+_GENDER_TAG = re.compile(
+    rf"\(?(?<![\w/|]){_GENDER_ITEM}(?:\s*[/|]\s*{_GENDER_ITEM})+(?![\w/|])\)?|"
+    r"\(\s*all genders?\s*\)",
+    re.IGNORECASE,
+)
 _LEVEL_ORDER = ["internship", "junior", "mid", "senior", "staff_principal"]
 
 
 def _clean(title: str) -> str:
     t = title.strip().replace("\u2019", "'").replace("\u2018", "'").replace("\u02bc", "'")
-    return _NOT_RANK.sub(" ", t)
+    return _GENDER_TAG.sub(" ", _NOT_RANK.sub(" ", t))
 
 
 def checked_title_level(title: str, level: str) -> str:
@@ -74,8 +86,34 @@ def title_named_level(title: str) -> str:
     return named[0] if _RANGE_SEP.search(_clean(title)) else named[-1]
 
 
+_NATIONAL_LANGUAGES = (
+    r"landessprache|national language|langue nationale|langues nationales|lingua nazionale"
+)
+_LANGUAGE_NAMED = {
+    "german": re.compile(rf"deutsch|german|allemand|tedesco|{_NATIONAL_LANGUAGES}", re.IGNORECASE),
+    "french": re.compile(
+        r"franz[öo]s|franzoes|french|fran[cç]ais|francese|francophone|" + _NATIONAL_LANGUAGES,
+        re.IGNORECASE,
+    ),
+}
+
+
+def _require_language_named(p: PostingText, result: Result) -> None:
+    """Rule 4: a language level needs the language (or the national languages) named somewhere."""
+    text = "\n".join([p.title or "", p.location_raw or "", *(s.text for s in p.sentences)])
+    for field, pattern in _LANGUAGE_NAMED.items():
+        value = result.values.get(field)
+        if value is None or value == "not_mentioned" or pattern.search(text):
+            continue
+        result.details.setdefault("rules", []).append(
+            f"{field} {value} -> not_mentioned (language not named)"
+        )
+        result.values[field] = "not_mentioned"
+        result.sentences[field] = []
+
+
 def apply_extraction_rules(p: PostingText, result: Result) -> None:
-    """Rules 1-3 above, in place. `seniority` is derived from `title_level`, so it follows."""
+    """Rules 1-4 above, in place. `seniority` is derived from `title_level`, so it follows."""
     if result.error:
         return
     values = result.values
@@ -83,12 +121,20 @@ def apply_extraction_rules(p: PostingText, result: Result) -> None:
         level = checked_title_level(p.title, values["title_level"])
         if level == "not_stated" and values["title_level"] != "not_stated":
             level = title_named_level(p.title)  # vetoed: use what the title itself says
+        if title_named_level(p.title) == "staff_principal" and level != "staff_principal":
+            level = "staff_principal"  # rule 1b: a rank title always wins
+            result.details.setdefault("rules", []).append(
+                f"title_level {values['title_level']} -> staff_principal"
+            )
+            values["title_level"] = level
+            result.sentences["title_level"] = []
         if level != values["title_level"]:
             result.details.setdefault("rules", []).append(
                 f"title_level {values['title_level']} -> {level}"
             )
             values["title_level"] = level
             result.sentences["title_level"] = []
+    _require_language_named(p, result)
     if values.get("work_mode") != "remote" and "remote_from_switzerland" in values:
         if values["remote_from_switzerland"] != "not_applicable":
             result.details.setdefault("rules", []).append(

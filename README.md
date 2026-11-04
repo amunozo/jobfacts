@@ -173,6 +173,9 @@ Milestones 3 and 4 start only after Milestones 1 and 2 are finished.
   search API, so assistants such as Claude can search postings directly.
 - Language requirements for English and Italian (Milestone 1 extracts
   German and French only).
+- Posting language as a search filter or a column in results (already
+  measured by code; a French posting hints at French at work even when no
+  requirement is stated). Owner idea, 4 Nov 2026.
 - Private mode: fit against a CV, and links to the private job-search
   repository (for example, `job_watch` reading from this database). This
   stays out of the public code.

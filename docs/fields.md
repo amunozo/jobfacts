@@ -45,6 +45,11 @@ Decided cases (owner, 2026-11-03):
 - A tag such as #LI-HYBRID counts as a statement.
 - When the job board's field and the description disagree, the description wins.
 
+Decided case (owner, 2026-11-04): "in one of our offices in Switzerland or in
+home office" (Swisscom: "in einem unserer Offices in der Schweiz oder im
+Homeoffice") → `remote`, with `remote_from_switzerland` = `allowed`. The worker
+chooses, so it is the "both options offered" case, not a home-office benefit.
+
 ### `office_cantons`
 A set of values: any of the 26 Swiss canton codes (`ZH`, `BE`, ... `JU`) and
 `outside_switzerland` (an office outside Switzerland is named). The model decides which
@@ -111,6 +116,17 @@ Decided cases: "English and/or French" → `french` is `nice_to_have` (English
 alone is enough); a school-grade prerequisite ("good grades in German") →
 `required_intermediate`; "maîtrise du français" → `required_fluent`.
 
+Decided cases (owner, 2026-11-04): generic wording ("other languages are a
+plus", "weitere Sprachkenntnisse von Vorteil") names no language → both fields
+`not_mentioned`. "Other national languages are a plus" ("weitere
+Landessprachen von Vorteil") names German and French. Code rule: a value other
+than `not_mentioned` is kept only if the posting names the language somewhere
+(Deutsch/German/allemand, Französisch/French/français, or "national
+languages"), in any of the three languages; otherwise it becomes
+`not_mentioned`. The check reads the whole posting, not only the quote, because
+some correct answers come with an empty quote. Abbreviations such as "D/F/E"
+are not recognised.
+
 ## 3. `seniority`
 
 | Value | Meaning |
@@ -165,6 +181,14 @@ Leiterin, Directrice, Direktorin, Chef(fe) d'équipe; Projektleiter(in)/-leitung
 itself names is used instead (one level: that one; an internship word wins; a range or
 alternatives give the lower end; otherwise the highest), else `not_stated`
 ("Senior Data Science Manager" with model `staff_principal` → `senior`).
+
+Decided cases (owner, 2026-11-04, title level): co-founder (Mitgründer,
+cofondateur), CEO and "Senior Manager" → `staff_principal` ("Senior Manager" is a
+rank above Manager in consulting). Code rule: when the title names
+`staff_principal` (and no lower level as a range), the level is
+`staff_principal` whatever the model said, as the order of evidence above
+requires. Gender tags ("(m/w/d)", "(H/F)") are removed before reading the title,
+so their slash is not read as a range.
 Title exclusions for relevance (`title_excluded`): sales, recruiting, talent, technician,
 customer success, insights, billing, payroll and partnerships titles are dropped unless the
 title also names a technical job (engineer, scientist, ML, AI ...); role names such as
@@ -189,6 +213,8 @@ the highest; a range or alternatives take the lowest.
 
 Nothing is assumed: an internship is **not** taken to be `fixed_term`, and a
 missing statement is `not_stated` (no quote). Added 2026-11-03 so that fixed-term
-roles can be filtered out of the search. "Employment type: Contract" with no duration → `fixed_term`. "Full time" is about hours, not
+roles can be filtered out of the search. Confirmed 2026-11-04: an
+apprenticeship that states its length ("(4 Jahre)", "Durée : 3 ans") is
+`fixed_term`; one that states none is `not_stated`. "Employment type: Contract" with no duration → `fixed_term`. "Full time" is about hours, not
 contract length, so it does not make a post `permanent`. **Search** treats
 `not_stated` as permanent: a "no fixed-term" filter drops only `fixed_term`.
