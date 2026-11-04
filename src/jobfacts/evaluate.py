@@ -658,7 +658,7 @@ NOTES = """## Notes on reading this report
 - Runs made before the canton redesign (`*_v1`) have no `office_cantons`; their office rows
   are skipped.
 - Labels are the reference's judgement, not ground truth; `relevant` is compared with the Jev
-  relevance probability (>= the threshold, 0.4, means relevant).
+  relevance probability (>= the relevance threshold means relevant).
 """
 
 SILVER_NOTES = """- The reference is the majority of three model labellers (gpt, gemini_or, opus),

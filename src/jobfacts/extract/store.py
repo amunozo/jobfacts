@@ -52,6 +52,27 @@ def save_relevance(
     )
 
 
+def refresh_relevance_flags(conn: psycopg.Connection, model: str, threshold: float) -> int:
+    """Set `relevant = probability >= threshold` on the stored scores of this model; returns
+    the number of rows whose flag changed. A threshold change then costs no model call."""
+    cur = conn.execute(
+        "UPDATE relevance SET relevant = (probability >= %s) "
+        "WHERE model = %s AND relevant IS DISTINCT FROM (probability >= %s)",
+        (threshold, model, threshold),
+    )
+    return cur.rowcount
+
+
+def rekey_relevance_version(conn: psycopg.Connection, model: str, old: str, new: str) -> int:
+    """Carry stored scores over from one relevance_version hash to another without re-scoring
+    (only when the change cannot alter the probabilities). Returns the rows changed."""
+    cur = conn.execute(
+        "UPDATE relevance SET spec_version = %s WHERE model = %s AND spec_version = %s",
+        (new, model, old),
+    )
+    return cur.rowcount
+
+
 def relevant_ids(conn: psycopg.Connection, model: str, origin: str = "board") -> list[int]:
     rows = conn.execute(
         "SELECT r.posting_id FROM relevance r JOIN postings p ON p.id = r.posting_id "

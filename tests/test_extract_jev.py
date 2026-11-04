@@ -133,10 +133,12 @@ def test_relevance_title_exclusion_skips_the_model():
     assert client.calls == []
 
 
-def test_relevance_version_changes_with_question_and_threshold(monkeypatch):
+def test_relevance_version_changes_with_question_but_not_threshold(monkeypatch):
     base = jev.relevance_version()
-    for name, value in [("RELEVANCE_QUESTION", "other"), ("RELEVANCE_THRESHOLD", 0.6)]:
-        with monkeypatch.context() as m:
-            m.setattr(jev, name, value)
-            assert jev.relevance_version() != base, name
-    assert jev.relevance_version() == base
+    with monkeypatch.context() as m:
+        m.setattr(jev, "RELEVANCE_QUESTION", "other")
+        assert jev.relevance_version() != base
+    with monkeypatch.context() as m:
+        m.setattr(jev, "RELEVANCE_THRESHOLD", 0.6)
+        assert jev.relevance_version() == base  # a threshold change costs no model call
+    assert jev.RELEVANCE_THRESHOLD == 0.2

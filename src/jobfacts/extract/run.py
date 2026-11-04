@@ -18,6 +18,7 @@ class RelevanceSummary:
     scored: int
     relevant: int
     errors: int
+    flags_changed: int = 0  # stored scores whose `relevant` flag changed with the threshold
 
 
 def run_relevance(
@@ -29,6 +30,8 @@ def run_relevance(
     progress: Callable[[int, int], None] | None = None,
 ) -> RelevanceSummary:
     version = jev.relevance_version()
+    flags_changed = store.refresh_relevance_flags(conn, model, threshold)
+    conn.commit()
     postings = store.load_postings(
         conn, only_unscored_by=None if rescore else model, relevance_version=version
     )
@@ -53,7 +56,7 @@ def run_relevance(
                 if progress:
                     progress(i, len(postings))
     conn.commit()
-    return RelevanceSummary(scored, relevant, errors)
+    return RelevanceSummary(scored, relevant, errors, flags_changed)
 
 
 def eligible_ids(conn: psycopg.Connection, model: str = jev.MODEL) -> list[int]:

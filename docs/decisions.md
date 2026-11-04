@@ -412,3 +412,36 @@ Newest at the bottom.
   variants stay); extracting one posting per group (location facts differ per
   city); marking duplicates in the database (more moving parts for a display
   problem).
+
+## 2026-11-04: Relevance threshold 0.4 -> 0.2 (recall first); threshold changes are free
+- **What:** postings with relevance probability >= 0.2 count as relevant. The
+  threshold is no longer part of the relevance version: the stored probability does
+  not depend on it, so a new threshold only recomputes the `relevant` flag in the
+  database (`store.refresh_relevance_flags`, run by `jobfacts relevance` and
+  `daily`) instead of re-scoring every posting (~5,600 calls, ~$1.10).
+- **Why:** owner priority is recall: a wrong row costs seconds, a missed job is
+  never seen. On 149 labelled postings recall goes 95/98 -> 97/98; search grows
+  from 417 to 506 jobs (~90 more, about 12-16 plausibly relevant by title), then
+  roughly 1-2 extra jobs a day. The three labelled misses share a pattern
+  (consulting / methodology / compliance roles with data and AI content, scored
+  0.16-0.28), so a lower threshold fixes a consistent blind spot. An independent
+  second opinion (Fable subagent) reached the same choice.
+- **Rejected:** 0.3 (adds 30 jobs, recovers no labelled miss); 0.22 (same labelled
+  recall with 11 fewer jobs, but fitted to one posting; three misses cannot
+  separate 0.2 from 0.22); 0.15 (48 more jobs for one more labelled hit; can be
+  tried later for free). Main risk: noise makes real roles easier to skim past.
+
+## 2026-11-04: Jev through OpenRouter as a backup
+- **What:** when a call to TypeSafe's Jev API fails for any reason, the same call
+  goes to OpenRouter's decisions endpoint (`typesafe/jev-1.14`, served by
+  TypeSafe). After 3 consecutive TypeSafe failures, the rest of the run uses
+  OpenRouter directly. Answers are stored as normal Jev results; the extraction
+  details record `route: openrouter`, and `daily` reports how many calls the
+  backup served.
+- **Why:** a quota or outage at TypeSafe would otherwise leave every new posting
+  with an error row. Checked 4 Nov: OpenRouter takes the SDK's exact request body
+  and returns the same answers, token counts and price for the same posting, so
+  no second model has to be evaluated.
+- **Rejected:** DeepSeek or Gemini as backup (a different model needs its own
+  accuracy check, and search would mix models); switching only on quota errors
+  (TypeSafe's quota signal is not documented: 402, 403 or 429).

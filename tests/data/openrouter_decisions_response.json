@@ -1,0 +1,561 @@
+{
+ "answers": {
+  "c_AG": {
+   "noul": 0.04,
+   "type": "noul"
+  },
+  "c_AI": {
+   "noul": 0.03,
+   "type": "noul"
+  },
+  "c_AR": {
+   "noul": 0.03,
+   "type": "noul"
+  },
+  "c_BE": {
+   "noul": 0.96,
+   "type": "noul"
+  },
+  "c_BL": {
+   "noul": 0.04,
+   "type": "noul"
+  },
+  "c_BS": {
+   "noul": 0.04,
+   "type": "noul"
+  },
+  "c_FR": {
+   "noul": 0.04,
+   "type": "noul"
+  },
+  "c_GE": {
+   "noul": 0.06,
+   "type": "noul"
+  },
+  "c_GL": {
+   "noul": 0.02,
+   "type": "noul"
+  },
+  "c_GR": {
+   "noul": 0.03,
+   "type": "noul"
+  },
+  "c_JU": {
+   "noul": 0.03,
+   "type": "noul"
+  },
+  "c_LU": {
+   "noul": 0.04,
+   "type": "noul"
+  },
+  "c_NE": {
+   "noul": 0.03,
+   "type": "noul"
+  },
+  "c_NW": {
+   "noul": 0.02,
+   "type": "noul"
+  },
+  "c_OW": {
+   "noul": 0.02,
+   "type": "noul"
+  },
+  "c_SG": {
+   "noul": 0.03,
+   "type": "noul"
+  },
+  "c_SH": {
+   "noul": 0.02,
+   "type": "noul"
+  },
+  "c_SO": {
+   "noul": 0.03,
+   "type": "noul"
+  },
+  "c_SZ": {
+   "noul": 0.03,
+   "type": "noul"
+  },
+  "c_TG": {
+   "noul": 0.03,
+   "type": "noul"
+  },
+  "c_TI": {
+   "noul": 0.04,
+   "type": "noul"
+  },
+  "c_UR": {
+   "noul": 0.03,
+   "type": "noul"
+  },
+  "c_VD": {
+   "noul": 0.04,
+   "type": "noul"
+  },
+  "c_VS": {
+   "noul": 0.04,
+   "type": "noul"
+  },
+  "c_ZG": {
+   "noul": 0.03,
+   "type": "noul"
+  },
+  "c_ZH": {
+   "noul": 0.05,
+   "type": "noul"
+  },
+  "c_outside": {
+   "noul": 0.04,
+   "type": "noul"
+  },
+  "s_contract_type_0": {
+   "choice": "none",
+   "confidence": 1,
+   "probabilities": {
+    "L": 0,
+    "S001": 0,
+    "S002": 0,
+    "S003": 0,
+    "S004": 0,
+    "S005": 0,
+    "S006": 0,
+    "S007": 0,
+    "S008": 0,
+    "S009": 0,
+    "S010": 0,
+    "S011": 0,
+    "S012": 0,
+    "S013": 0,
+    "S014": 0,
+    "S015": 0,
+    "S016": 0,
+    "S017": 0,
+    "S018": 0,
+    "S019": 0,
+    "S020": 0,
+    "S021": 0,
+    "S022": 0,
+    "S023": 0,
+    "S024": 0,
+    "S025": 0,
+    "S026": 0,
+    "S027": 0,
+    "S028": 0,
+    "S029": 0,
+    "S030": 0,
+    "S031": 0,
+    "S032": 0,
+    "S033": 0,
+    "T": 0,
+    "none": 1
+   },
+   "type": "choice"
+  },
+  "s_french_0": {
+   "choice": "none",
+   "confidence": 0.67,
+   "probabilities": {
+    "L": 0,
+    "S001": 0,
+    "S002": 0,
+    "S003": 0,
+    "S004": 0,
+    "S005": 0,
+    "S006": 0,
+    "S007": 0,
+    "S008": 0.32,
+    "S009": 0,
+    "S010": 0,
+    "S011": 0,
+    "S012": 0,
+    "S013": 0,
+    "S014": 0,
+    "S015": 0,
+    "S016": 0,
+    "S017": 0,
+    "S018": 0,
+    "S019": 0,
+    "S020": 0,
+    "S021": 0,
+    "S022": 0,
+    "S023": 0,
+    "S024": 0,
+    "S025": 0,
+    "S026": 0,
+    "S027": 0,
+    "S028": 0,
+    "S029": 0,
+    "S030": 0,
+    "S031": 0,
+    "S032": 0,
+    "S033": 0,
+    "T": 0,
+    "none": 0.68
+   },
+   "type": "choice"
+  },
+  "s_german_0": {
+   "choice": "S008",
+   "confidence": 0.9,
+   "probabilities": {
+    "L": 0,
+    "S001": 0.01,
+    "S002": 0,
+    "S003": 0,
+    "S004": 0,
+    "S005": 0,
+    "S006": 0,
+    "S007": 0,
+    "S008": 0.9,
+    "S009": 0,
+    "S010": 0,
+    "S011": 0,
+    "S012": 0,
+    "S013": 0,
+    "S014": 0,
+    "S015": 0,
+    "S016": 0,
+    "S017": 0,
+    "S018": 0,
+    "S019": 0,
+    "S020": 0,
+    "S021": 0,
+    "S022": 0,
+    "S023": 0,
+    "S024": 0,
+    "S025": 0,
+    "S026": 0,
+    "S027": 0,
+    "S028": 0,
+    "S029": 0,
+    "S030": 0,
+    "S031": 0,
+    "S032": 0,
+    "S033": 0,
+    "T": 0,
+    "none": 0.09
+   },
+   "type": "choice"
+  },
+  "s_min_years_0": {
+   "choice": "none",
+   "confidence": 0.93,
+   "probabilities": {
+    "L": 0,
+    "S001": 0,
+    "S002": 0,
+    "S003": 0,
+    "S004": 0,
+    "S005": 0,
+    "S006": 0,
+    "S007": 0,
+    "S008": 0.07,
+    "S009": 0,
+    "S010": 0,
+    "S011": 0,
+    "S012": 0,
+    "S013": 0,
+    "S014": 0,
+    "S015": 0,
+    "S016": 0,
+    "S017": 0,
+    "S018": 0,
+    "S019": 0,
+    "S020": 0,
+    "S021": 0,
+    "S022": 0,
+    "S023": 0,
+    "S024": 0,
+    "S025": 0,
+    "S026": 0,
+    "S027": 0,
+    "S028": 0,
+    "S029": 0,
+    "S030": 0,
+    "S031": 0,
+    "S032": 0,
+    "S033": 0,
+    "T": 0,
+    "none": 0.93
+   },
+   "type": "choice"
+  },
+  "s_office_cantons_0": {
+   "choice": "L",
+   "confidence": 0.84,
+   "probabilities": {
+    "L": 0.84,
+    "S001": 0,
+    "S002": 0,
+    "S003": 0,
+    "S004": 0,
+    "S005": 0,
+    "S006": 0,
+    "S007": 0,
+    "S008": 0.05,
+    "S009": 0,
+    "S010": 0,
+    "S011": 0,
+    "S012": 0,
+    "S013": 0,
+    "S014": 0,
+    "S015": 0,
+    "S016": 0,
+    "S017": 0,
+    "S018": 0,
+    "S019": 0,
+    "S020": 0,
+    "S021": 0.1,
+    "S022": 0,
+    "S023": 0,
+    "S024": 0,
+    "S025": 0,
+    "S026": 0,
+    "S027": 0,
+    "S028": 0,
+    "S029": 0,
+    "S030": 0,
+    "S031": 0,
+    "S032": 0,
+    "S033": 0,
+    "T": 0,
+    "none": 0.01
+   },
+   "type": "choice"
+  },
+  "s_remote_from_switzerland_0": {
+   "choice": "S008",
+   "confidence": 0.97,
+   "probabilities": {
+    "L": 0,
+    "S001": 0,
+    "S002": 0,
+    "S003": 0,
+    "S004": 0,
+    "S005": 0,
+    "S006": 0,
+    "S007": 0,
+    "S008": 0.97,
+    "S009": 0,
+    "S010": 0,
+    "S011": 0,
+    "S012": 0,
+    "S013": 0,
+    "S014": 0,
+    "S015": 0,
+    "S016": 0,
+    "S017": 0,
+    "S018": 0,
+    "S019": 0,
+    "S020": 0,
+    "S021": 0,
+    "S022": 0,
+    "S023": 0,
+    "S024": 0,
+    "S025": 0,
+    "S026": 0,
+    "S027": 0,
+    "S028": 0,
+    "S029": 0,
+    "S030": 0,
+    "S031": 0,
+    "S032": 0,
+    "S033": 0,
+    "T": 0,
+    "none": 0.03
+   },
+   "type": "choice"
+  },
+  "s_title_level_0": {
+   "choice": "T",
+   "confidence": 0.96,
+   "probabilities": {
+    "L": 0,
+    "S001": 0,
+    "S002": 0,
+    "S003": 0,
+    "S004": 0,
+    "S005": 0,
+    "S006": 0,
+    "S007": 0,
+    "S008": 0,
+    "S009": 0,
+    "S010": 0,
+    "S011": 0,
+    "S012": 0,
+    "S013": 0,
+    "S014": 0,
+    "S015": 0,
+    "S016": 0,
+    "S017": 0,
+    "S018": 0,
+    "S019": 0,
+    "S020": 0,
+    "S021": 0,
+    "S022": 0,
+    "S023": 0,
+    "S024": 0,
+    "S025": 0,
+    "S026": 0,
+    "S027": 0,
+    "S028": 0,
+    "S029": 0,
+    "S030": 0,
+    "S031": 0,
+    "S032": 0,
+    "S033": 0,
+    "T": 0.96,
+    "none": 0.04
+   },
+   "type": "choice"
+  },
+  "s_work_mode_0": {
+   "choice": "S008",
+   "confidence": 0.97,
+   "probabilities": {
+    "L": 0,
+    "S001": 0,
+    "S002": 0,
+    "S003": 0,
+    "S004": 0,
+    "S005": 0,
+    "S006": 0,
+    "S007": 0,
+    "S008": 0.97,
+    "S009": 0,
+    "S010": 0,
+    "S011": 0,
+    "S012": 0,
+    "S013": 0,
+    "S014": 0,
+    "S015": 0,
+    "S016": 0,
+    "S017": 0,
+    "S018": 0,
+    "S019": 0,
+    "S020": 0,
+    "S021": 0,
+    "S022": 0,
+    "S023": 0,
+    "S024": 0,
+    "S025": 0,
+    "S026": 0,
+    "S027": 0,
+    "S028": 0,
+    "S029": 0,
+    "S030": 0,
+    "S031": 0,
+    "S032": 0,
+    "S033": 0,
+    "T": 0,
+    "none": 0.03
+   },
+   "type": "choice"
+  },
+  "v_contract_type": {
+   "choice": "not_stated",
+   "confidence": 1,
+   "probabilities": {
+    "fixed_term": 0,
+    "not_stated": 1,
+    "permanent": 0
+   },
+   "type": "choice"
+  },
+  "v_french": {
+   "choice": "nice_to_have",
+   "confidence": 0.74,
+   "probabilities": {
+    "either_required": 0,
+    "nice_to_have": 0.78,
+    "not_mentioned": 0.22,
+    "required_fluent": 0,
+    "required_intermediate": 0,
+    "required_level_not_stated": 0
+   },
+   "type": "choice"
+  },
+  "v_german": {
+   "choice": "required_fluent",
+   "confidence": 0.99,
+   "probabilities": {
+    "either_required": 0,
+    "nice_to_have": 0,
+    "not_mentioned": 0,
+    "required_fluent": 0.99,
+    "required_intermediate": 0.01,
+    "required_level_not_stated": 0
+   },
+   "type": "choice"
+  },
+  "v_min_years": {
+   "choice": "not_stated",
+   "confidence": 0.98,
+   "probabilities": {
+    "0": 0,
+    "1": 0,
+    "10": 0,
+    "11": 0,
+    "12": 0,
+    "13": 0,
+    "14": 0,
+    "15": 0,
+    "15_plus": 0,
+    "2": 0.01,
+    "3": 0.01,
+    "4": 0,
+    "5": 0,
+    "6": 0,
+    "7": 0,
+    "8": 0,
+    "9": 0,
+    "not_stated": 0.98
+   },
+   "type": "choice"
+  },
+  "v_remote_from_switzerland": {
+   "choice": "allowed",
+   "confidence": 0.84,
+   "probabilities": {
+    "allowed": 0.87,
+    "not_allowed": 0,
+    "not_applicable": 0.11,
+    "not_stated": 0.02,
+    "unclear": 0
+   },
+   "type": "choice"
+  },
+  "v_title_level": {
+   "choice": "senior",
+   "confidence": 1,
+   "probabilities": {
+    "internship": 0,
+    "junior": 0,
+    "mid": 0,
+    "not_stated": 0,
+    "senior": 1,
+    "staff_principal": 0
+   },
+   "type": "choice"
+  },
+  "v_work_mode": {
+   "choice": "remote",
+   "confidence": 0.83,
+   "probabilities": {
+    "hybrid": 0.13,
+    "not_stated": 0,
+    "onsite": 0,
+    "remote": 0.87
+   },
+   "type": "choice"
+  }
+ },
+ "id": "gen-dec-recorded",
+ "model": "typesafe/jev-1.14-20261014",
+ "provider": "TypeSafe",
+ "usage": {
+  "cost": 0.000415338,
+  "input_tokens": 9889,
+  "output_tokens": 3980
+ }
+}

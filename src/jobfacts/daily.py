@@ -76,20 +76,28 @@ def _collect(conn, totals: dict) -> None:
 
 def _relevance(conn, totals: dict) -> None:
     from jobfacts.extract import jev
+    from jobfacts.extract.jev_backup import backup_calls, backup_line
     from jobfacts.extract.run import run_relevance
 
-    r = run_relevance(conn, jev.make_client())
+    client = jev.make_client()
+    r = run_relevance(conn, client)
+    print(f"relevance flags updated for threshold {jev.RELEVANCE_THRESHOLD}: {r.flags_changed}")
     print(f"scored {r.scored}, relevant {r.relevant}, errors {r.errors}")
+    if line := backup_line(backup_calls(client)):
+        print(line)
     totals.update(relevant=r.relevant, errors=totals.get("errors", 0) + r.errors)
 
 
 def _extract(conn, totals: dict) -> None:
+    from jobfacts.extract.jev_backup import backup_line_for_results
     from jobfacts.extract.run import make_extractor, run_extraction
 
     run_id, results = run_extraction(conn, make_extractor("jev"), None, None, for_search=True)
     failed = sum(1 for x in results if x.error)
     cost = sum(x.cost_usd for x in results)
     print(f"run {run_id}: {len(results)} postings, {failed} errors, ${cost:.4f}")
+    if line := backup_line_for_results(results):
+        print(line)
     totals.update(
         extracted=len(results) - failed,
         errors=totals.get("errors", 0) + failed,

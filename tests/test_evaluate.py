@@ -89,7 +89,7 @@ def test_unsure_excluded_and_relevance_threshold():
     items = [item(1), item(2), item(3)]
     labels = {1: label(1, relevant="true"), 2: label(2, relevant="unsure"),
               3: label(3, relevant="false")}  # fmt: skip
-    rel = {1: 0.4, 2: 0.9, 3: 0.39}
+    rel = {1: 0.2, 2: 0.9, 3: 0.19}  # threshold 0.2
     records, counts = ev.score_records(items, labels, {}, rel)
     assert counts["unsure"] == 1
     assert ev.summarize(records, extractor=ev.RELEVANCE_EXTRACTOR, field="relevant") == (2, 2, 0)

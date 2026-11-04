@@ -15,6 +15,7 @@ from typesafe_sdk import Choice, Noul, TypeSafeClient
 
 from jobfacts import locations
 from jobfacts.extract.base import Result
+from jobfacts.extract.jev_backup import FallbackClient, OpenRouterJev
 from jobfacts.extract.posting import PostingText, label, parse_label
 from jobfacts.extract.rules import TITLE_RULES, apply_extraction_rules, title_excluded
 from jobfacts.extract.spec import (
@@ -36,7 +37,7 @@ PRICE_PER_MTOK_IN = 0.042
 MAX_OPTIONS = 255
 NONE = "none"
 CANTON_THRESHOLD = 0.5
-RELEVANCE_THRESHOLD = 0.4
+RELEVANCE_THRESHOLD = 0.2  # owner decision 4 Nov 2026: recall first
 RELEVANCE_SENTENCES = 5
 
 # Bump when code that changes Jev's input or the stored output changes without changing any
@@ -56,9 +57,13 @@ SENTENCE_QUESTION = (
 OFFICE_EVIDENCE_SUFFIX = " Choices are line ids."
 
 
-def make_client() -> TypeSafeClient:
-    load_dotenv()  # reads TYPESAFE_API_KEY from .env (never printed)
-    return TypeSafeClient(model=MODEL, timeout=120.0)
+def make_client() -> Any:
+    """The TypeSafe client; with `OPENROUTER_API_KEY` set, wrapped so that a failed call is
+    retried through OpenRouter (same model, see jev_backup)."""
+    load_dotenv()  # reads TYPESAFE_API_KEY and OPENROUTER_API_KEY from .env (never printed)
+    primary = TypeSafeClient(model=MODEL, timeout=120.0)
+    backup = OpenRouterJev.from_env()
+    return FallbackClient(primary, backup) if backup else primary
 
 
 def chunks(ids: list[int], size: int = MAX_OPTIONS - 1) -> list[list[int]]:
@@ -154,12 +159,25 @@ class JevExtractor:
             result.latency_ms = int((time.monotonic() - started) * 1000)
             return result
         result.latency_ms = int((time.monotonic() - started) * 1000)
+        try:
+            return self._read(p, response, result)
+        except (KeyError, TypeError, AttributeError, ValueError) as error:
+            # A reply without an expected answer or token count: an error row, not a crash
+            # of the whole run (the thread pool would re-raise it).
+            bad = Result(latency_ms=result.latency_ms)
+            bad.error = f"BadResponse: {type(error).__name__}: {error}"
+            return bad
+
+    def _read(self, p: PostingText, response: Any, result: Result) -> Result:
+        """Fill `result` from a System One response (TypeSafe or the OpenRouter backup)."""
         result.tokens_in = response.usage.input_tokens
         result.tokens_out = response.usage.output_tokens
         result.cost_usd = result.tokens_in * PRICE_PER_MTOK_IN / 1e6
         answers = response.answers
         n_chunks = len(chunks([TITLE_ID, LOCATION_ID, *(s.id for s in p.sentences)]))
         details: dict[str, Any] = {"model_returned": getattr(response, "model", None)}
+        if route := getattr(response, "route", None):  # set by the OpenRouter backup client
+            details["route"] = route
         if self.ordering != "original":
             details["ordering"] = self.ordering
         for f in FIELDS.values():
@@ -194,12 +212,13 @@ class JevExtractor:
 
 
 def relevance_version() -> str:
-    """Version of everything that decides a relevance score; stored with each score, so a
-    change makes `jobfacts relevance` re-score all postings once."""
+    """Version of everything that decides a relevance score (the stored probability); stored
+    with each score, so a change makes `jobfacts relevance` re-score all postings once. The
+    threshold is not part of it: it only sets the `relevant` flag, which
+    `store.refresh_relevance_flags` updates from the stored probabilities without model calls."""
     parts = [
         RELEVANCE_QUESTION,
         MODEL,
-        f"threshold:{RELEVANCE_THRESHOLD}",
         f"sentences:{RELEVANCE_SENTENCES}",
         TITLE_RULES,
     ]

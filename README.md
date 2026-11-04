@@ -176,6 +176,10 @@ Milestones 3 and 4 start only after Milestones 1 and 2 are finished.
 - Posting language as a search filter or a column in results (already
   measured by code; a French posting hints at French at work even when no
   requirement is stated). Owner idea, 4 Nov 2026.
+- Log jobs the owner applies to (or wants) that scored below the relevance
+  threshold: free, unbiased labels for relevance misses. If the same kind of
+  role keeps appearing, give the relevance question more of the posting
+  (today: title and first sentences) rather than lowering the threshold.
 - Private mode: fit against a CV, and links to the private job-search
   repository (for example, `job_watch` reading from this database). This
   stays out of the public code.
