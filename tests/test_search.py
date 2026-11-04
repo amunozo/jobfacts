@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 import pytest
 
 from jobfacts import search
@@ -425,3 +427,119 @@ def test_stale_relevance_count(conn, seed):
     store.save_relevance(conn, pid, jev.MODEL, 0.9, 0.4, jev.relevance_version())
     conn.commit()
     assert search.stale_relevance_count(conn) == 0
+
+
+@pytest.mark.db
+def test_stale_relevance_count_ignores_closed_postings(conn, seed):
+    pid = seed.add()  # old relevance row
+    conn.execute("UPDATE postings SET closed_at = now() WHERE id = %s", (pid,))
+    conn.commit()
+    assert search.stale_relevance_count(conn) == 0
+
+
+# ---------- duplicate grouping ----------
+
+
+def other_employer(conn, seed, pid):
+    emp = conn.execute(
+        "INSERT INTO employers (name, ats, board_id) VALUES ('Other','lever','o') RETURNING id"
+    ).fetchone()[0]
+    conn.execute("UPDATE postings SET employer_id = %s WHERE id = %s", (emp, pid))
+
+
+def set_location(conn, pid, location):
+    conn.execute("UPDATE postings SET location_raw = %s WHERE id = %s", (location, pid))
+
+
+@pytest.mark.db
+def test_same_title_at_one_employer_is_one_hit_with_duplicates(conn, seed):
+    first = seed.add(title="AI Engineer (m/w/d)", days_old=0)
+    second = seed.add(title="ai engineer (f/m/d)", days_old=1)
+    set_location(conn, first, "Zurich")
+    set_location(conn, second, "Berlin")
+    hits, total = search.search(conn, Filters())
+    assert total == 1 and len(hits) == 1
+    assert hits[0].id == first  # newest first
+    assert hits[0].duplicates == [
+        {"id": second, "url": f"https://x/{seed.n}", "location_raw": "Berlin"}
+    ]
+    assert hits[0].as_dict()["duplicates"] == hits[0].duplicates
+
+
+@pytest.mark.db
+def test_same_title_at_two_employers_is_two_hits(conn, seed):
+    seed.add(title="AI Engineer")
+    other_employer(conn, seed, seed.add(title="AI Engineer"))
+    hits, total = search.search(conn, Filters())
+    assert total == 2 and len(hits) == 2
+    assert all(h.duplicates == [] for h in hits)
+    assert all(h.as_dict()["duplicates"] == [] for h in hits)
+
+
+@pytest.mark.db
+def test_group_appears_if_any_member_matches_and_that_member_represents(conn, seed):
+    seed.add(title="AI Engineer", cantons=("GE",), days_old=0)
+    zh = seed.add(title="AI Engineer", cantons=("ZH",), days_old=5)
+    hits, total = search.search(conn, Filters(cantons=["ZH"]))
+    assert total == 1 and [h.id for h in hits] == [zh]
+    assert hits[0].duplicates == []
+
+
+@pytest.mark.db
+def test_limit_counts_groups(conn, seed):
+    for title in ("A", "B", "C"):
+        seed.add(title=title, days_old=3)
+        seed.add(title=title, days_old=4)
+    hits, total = search.search(conn, Filters(limit=2))
+    assert len(hits) == 2 and total == 3
+    assert all(len(h.duplicates) == 1 for h in hits)
+
+
+@pytest.mark.db
+def test_query_rank_picks_the_best_posting_as_representative(conn, seed):
+    weak = seed.add(title="Engineer", desc="machine " * 1, days_old=0)
+    strong = seed.add(title="Engineer", desc="machine " * 20, days_old=1)
+    hits, total = search.search(conn, Filters(query="machine"))
+    assert total == 1 and hits[0].id == strong
+    assert [d["id"] for d in hits[0].duplicates] == [weak]
+
+
+@pytest.mark.db
+def test_evidence_for_a_group_and_table_lists_the_other_locations(conn, seed):
+    first = seed.add(title="AI Engineer", desc="Intro. Gute Deutschkenntnisse. End.")
+    set_location(conn, first, "Zurich")
+    for days, place in ((2, "Abuja, Nigeria"), (3, "Astana, Kazakhstan")):
+        set_location(conn, seed.add(title="AI Engineer (m/w/d)", days_old=days), place)
+    hits, total = search.search(conn, Filters(), evidence=True)
+    assert total == 1 and hits[0].id == first
+    assert hits[0].evidence["german"] == ["Gute Deutschkenntnisse."]
+    text = search.format_table(hits, total)
+    assert "\n   + 2 more locations: Abuja, Nigeria; Astana, Kazakhstan" in text
+    assert "1 matches, showing 1" in text
+    no_dups = search.format_table([replace(hits[0], duplicates=[])], 1)
+    assert "more locations" not in no_dups
+
+
+@pytest.mark.db
+def test_evidence_only_for_shown_hits(conn, seed, monkeypatch):
+    for title in ("A", "B", "C"):
+        seed.add(title=title, desc="Intro. Gute Deutschkenntnisse. End.")
+    asked = []
+    real = search.build_evidence
+
+    def spy(ids):
+        asked.append(list(ids))
+        return real(ids)
+
+    monkeypatch.setattr(search, "build_evidence", spy)
+    hits, total = search.search(conn, Filters(limit=1), evidence=True)
+    assert total == 3 and asked == [[hits[0].id]]
+    assert hits[0].evidence["german"] == ["Gute Deutschkenntnisse."]
+
+
+@pytest.mark.db
+def test_one_duplicate_reads_location_singular(conn, seed):
+    set_location(conn, seed.add(title="AI Engineer", days_old=1), "Zurich")
+    set_location(conn, seed.add(title="AI Engineer", days_old=2), "Bern")
+    hits, total = search.search(conn, Filters())
+    assert "\n   + 1 more location: Bern" in search.format_table(hits, total)

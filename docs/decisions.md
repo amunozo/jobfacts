@@ -399,3 +399,16 @@ Newest at the bottom.
   "no guessing"; the posting language is already a separate value); filling in
   any level the title names when the model says `not_stated` (only the rank level
   is forced, since the rules already say a rank title always wins).
+
+## 2026-11-04: Group duplicate postings in search
+- **What:** search shows one row per job: same employer + same title after
+  normalising (gender tags, case, spaces). The best-ranked matching posting is
+  shown; the others are listed as `duplicates`. Relevance and extraction stay per
+  posting; no schema change.
+- **Why:** 857 of ~5,600 open postings repeated another posting of the same
+  employer (one copy per city), and one board's repeated ads were most of the
+  noise when testing a lower relevance threshold.
+- **Rejected:** requiring identical text too (catches 544 of 857; per-city
+  variants stay); extracting one posting per group (location facts differ per
+  city); marking duplicates in the database (more moving parts for a display
+  problem).

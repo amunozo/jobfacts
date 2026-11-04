@@ -47,11 +47,14 @@ _FUNCTION_LEITER = re.compile(r"projektleit|testleit", re.IGNORECASE)
 _RANK_WORD = re.compile(r"teamleit|head|lead\b|principal|staff\b", re.IGNORECASE)
 # Separators that make two level words a range or a set of alternatives ("Confirmé à Sénior").
 _RANGE_SEP = re.compile(r"\s[-–/]\s|/|–|\s(?:to|à|bis|or|oder|ou)\s", re.IGNORECASE)
-# Gender tags such as "(m/w/d)", "(f/m/d)", "(H/F)", "m/w/d", "(all genders)" are not ranges.
-_GENDER_ITEM = r"(?:[mwfdhx]|divers[e]?)"
-_GENDER_TAG = re.compile(
-    rf"\(?(?<![\w/|]){_GENDER_ITEM}(?:\s*[/|]\s*{_GENDER_ITEM})+(?![\w/|])\)?|"
-    r"\(\s*all genders?\s*\)",
+# Gender tags such as "(m/w/d)", "( m/w/d )", "(m,w,d)", "(m/w/div)", "(gn)", "(all genders)"
+# and unbracketed "H/F" / "m/w/d" are not ranges. Unbracketed letters count only at the end of
+# the title or before a separator ("Consultant - F/H - CDI"), so "Head of F/X Trading" stays.
+_GENDER_ITEM = r"(?:[mwfdhx]|div(?:ers[e]?)?)"
+GENDER_TAG = re.compile(
+    rf"\(\s*{_GENDER_ITEM}(?:\s*[/|,.]\s*{_GENDER_ITEM})+\s*\)\*?|"
+    r"\(\s*(?:gn|all genders?|alle geschlechter)\s*\)\*?|"
+    rf"(?<![\w/|]){_GENDER_ITEM}(?:\s*[/|]\s*{_GENDER_ITEM})+\*?(?=\s*(?:$|[-–|,]))",
     re.IGNORECASE,
 )
 _LEVEL_ORDER = ["internship", "junior", "mid", "senior", "staff_principal"]
@@ -59,7 +62,7 @@ _LEVEL_ORDER = ["internship", "junior", "mid", "senior", "staff_principal"]
 
 def _clean(title: str) -> str:
     t = title.strip().replace("\u2019", "'").replace("\u2018", "'").replace("\u02bc", "'")
-    return _GENDER_TAG.sub(" ", _NOT_RANK.sub(" ", t))
+    return GENDER_TAG.sub(" ", _NOT_RANK.sub(" ", t))
 
 
 def checked_title_level(title: str, level: str) -> str:

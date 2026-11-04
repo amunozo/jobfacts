@@ -12,6 +12,7 @@ from jobfacts import locations
 from jobfacts import sentences as splitter
 from jobfacts.extract import jev
 from jobfacts.extract.spec import FIELDS, LOCATION_ID, SENIORITY_VALUES, TITLE_ID
+from jobfacts.grouping import group_rows
 
 # What each --german-max / --french-max level keeps (values of the language fields).
 _ALWAYS = ["not_mentioned", "nice_to_have"]
@@ -93,9 +94,11 @@ JOIN LATERAL (
 
 
 def stale_relevance_count(conn) -> int:
-    """Relevance rows of Jev not made with the current relevance version."""
+    """Relevance rows of Jev for open postings not made with the current relevance version
+    (closed postings are never re-scored, so they do not count)."""
     return conn.execute(
-        "SELECT count(*) FROM relevance WHERE model = %s AND spec_version IS DISTINCT FROM %s",
+        "SELECT count(*) FROM relevance r JOIN postings p ON p.id = r.posting_id "
+        "WHERE p.closed_at IS NULL AND r.model = %s AND r.spec_version IS DISTINCT FROM %s",
         (jev.MODEL, jev.relevance_version()),
     ).fetchone()[0]
 
@@ -107,10 +110,14 @@ def _language_values(maximum: str, show_unclear: bool) -> list[str]:
     return values
 
 
-def build(f: Filters, with_description: bool = False) -> tuple[str, dict]:
-    """Return (SQL, parameters). Pure: no database access."""
+def build(f: Filters) -> tuple[str, dict]:
+    """Return (SQL, parameters) for all matching postings, in result order.
+
+    Pure: no database access. There is no LIMIT: `search` groups duplicates first and then
+    applies the limit to the groups.
+    """
     f.validate()
-    params: dict = {"rel_model": jev.MODEL, "limit": f.limit}
+    params: dict = {"rel_model": jev.MODEL}
     where = ["p.closed_at IS NULL", "p.origin = 'board'"]
 
     location_parts = []
@@ -150,15 +157,24 @@ def build(f: Filters, with_description: bool = False) -> tuple[str, dict]:
         order = "p.first_seen_at DESC, p.id"
 
     columns = (
-        "p.id, p.title, emp.name, p.url, p.first_seen_at, x.office_cantons, x.office_places, "
+        "p.id, p.employer_id, p.title, emp.name, p.url, p.first_seen_at, x.office_cantons, "
+        "x.office_places, "
         "x.work_mode, x.remote_from_switzerland, x.german, x.french, x.seniority, x.contract_type, "
-        f"p.location_raw, {rank} AS rank, count(*) OVER () AS total"
+        f"p.location_raw, {rank} AS rank"
     )
-    if with_description:
-        columns += ", p.description_text"
-        columns += ", " + ", ".join(f"x.{n}_sentences AS {n}_sentences" for n in EVIDENCE_FIELDS)
-    sql = f"SELECT {columns} {_BASE} WHERE {' AND '.join(where)} ORDER BY {order} LIMIT %(limit)s"
+    sql = f"SELECT {columns} {_BASE} WHERE {' AND '.join(where)} ORDER BY {order}"
     return sql, params
+
+
+def build_evidence(ids: list[int]) -> tuple[str, dict]:
+    """SQL for the description and the evidence sentence ids of the given postings."""
+    columns = "p.id, p.title, p.location_raw, p.description_text, " + ", ".join(
+        f"x.{n}_sentences AS {n}_sentences" for n in EVIDENCE_FIELDS
+    )
+    return (
+        f"SELECT {columns} {_BASE} WHERE p.id = ANY(%(ids)s)",
+        {"rel_model": jev.MODEL, "ids": ids},
+    )
 
 
 @dataclass
@@ -179,6 +195,7 @@ class Hit:
     rank: float
     location_raw: str | None = None
     evidence: dict[str, list[str]] | None = None
+    duplicates: list[dict] = field(default_factory=list)  # same job at other locations
 
     @property
     def where(self) -> str:
@@ -205,6 +222,7 @@ class Hit:
             "contract_type": self.contract_type,
             "rank": self.rank,
             "location_raw": self.location_raw,
+            "duplicates": self.duplicates,
         }
         if self.evidence is not None:
             d["evidence"] = self.evidence
@@ -221,15 +239,28 @@ def _evidence(row: dict) -> dict[str, list[str]]:
     }
 
 
-def search(conn: psycopg.Connection, f: Filters, evidence: bool = False) -> tuple[list[Hit], int]:
-    """Run the search. Returns (hits, total number of matches before the limit)."""
-    sql, params = build(f, with_description=evidence)
+def _rows(conn: psycopg.Connection, sql: str, params: dict) -> list[dict]:
     cur = conn.execute(sql, params)
     names = [c.name for c in cur.description]
-    hits, total = [], 0
-    for values in cur.fetchall():
-        row = dict(zip(names, values, strict=True))
-        total = row["total"]
+    return [dict(zip(names, values, strict=True)) for values in cur.fetchall()]
+
+
+def search(conn: psycopg.Connection, f: Filters, evidence: bool = False) -> tuple[list[Hit], int]:
+    """Run the search. Returns (hits, total number of matching jobs before the limit).
+
+    Postings of the same employer with the same normalised title are one job (see
+    `grouping`): the best-ranked matching posting is shown and the others are its
+    `duplicates`. The total and the limit count jobs, not postings.
+    """
+    sql, params = build(f)
+    groups = group_rows(_rows(conn, sql, params))
+    shown = groups[: f.limit]
+    evidence_by_id: dict[int, dict] = {}
+    if evidence and shown:  # sentences are split only for the jobs that are shown
+        sql, params = build_evidence([row["id"] for row, _ in shown])
+        evidence_by_id = {r["id"]: _evidence(r) for r in _rows(conn, sql, params)}
+    hits = []
+    for row, dups in shown:
         hits.append(
             Hit(
                 row["id"],
@@ -247,10 +278,11 @@ def search(conn: psycopg.Connection, f: Filters, evidence: bool = False) -> tupl
                 row["contract_type"],
                 float(row["rank"]),
                 row["location_raw"],
-                _evidence(row) if evidence else None,
+                evidence_by_id.get(row["id"]),
+                [{"id": d["id"], "url": d["url"], "location_raw": d["location_raw"]} for d in dups],
             )
         )
-    return hits, total
+    return hits, len(groups)
 
 
 def _cut(text: str, width: int) -> str:
@@ -270,6 +302,11 @@ def format_table(hits: list[Hit], total: int, evidence: bool = False) -> str:
         )
         flag = "  [check language first]" if UNCLEAR_LEVEL in (h.german, h.french) else ""
         lines.append(f"   {h.url}{flag}")
+        if h.duplicates:
+            places = "; ".join(d["location_raw"] or "location not stated" for d in h.duplicates)
+            n = len(h.duplicates)
+            label = f"+ {n} more location{'s' if n > 1 else ''}: {places}"
+            lines.append("   " + _cut(label, 107))
         if evidence and h.evidence:
             for name, texts in h.evidence.items():
                 if texts:

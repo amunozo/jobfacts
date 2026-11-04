@@ -18,6 +18,20 @@ only new, changed or previously failed postings are read. It also redoes posting
 under an older `spec_version` (changed extraction rules). When several extractions exist,
 search shows the latest one. Experiment runs and extractions of an older text are never shown: a posting whose text changed disappears from search until `jobfacts daily` re-extracts it (an older spec version with the current text is still shown until then). Each hit also carries `location_raw`, the board's raw location text.
 
+## Duplicates are grouped
+
+Many employers post one job once per city (EWOR: the same text in 20 cities; Tether: one
+remote role per country). Search shows each job once: postings of the same employer whose
+titles are equal after `grouping.title_key` (gender tags such as "(m/w/d)" removed, case,
+spaces and `&nbsp;` ignored; other brackets such as "(100 % remote)" kept) form one group.
+Grouping happens only here; relevance and extraction still run per posting, because
+location facts differ by city. A group appears if any of its postings matches the filters;
+the best-ranked matching posting is shown with its facts, and the other matching postings
+are listed under it (`+ N more locations: ...`; in JSON `duplicates: [{id, url,
+location_raw}]`, always present). `total` and `--limit` count groups. Two different jobs
+with the same generic title at one employer are shown as one group with both links
+(accepted, 4 Nov 2026). On 4 Nov: 463 postings, 417 groups.
+
 ## Query
 
 PostgreSQL full-text search over title + description (`search_tsv`, a generated
@@ -43,7 +57,7 @@ description matches. Results are ordered by `ts_rank`; with no query, newest fir
 | `--no-fixed-term` | Drop `contract_type = fixed_term`; `permanent`, `not_stated` (counted as permanent) and rows extracted before the field existed stay. |
 | `--seniority junior,mid` | Derived seniority is one of these. |
 | `--new-days N` | First seen in the last N days. |
-| `--limit N` | Rows shown (default 20). The header gives the total. |
+| `--limit N` | Jobs (groups) shown (default 20). The header gives the total number of groups. |
 | `--evidence` | Print the supporting sentence of each fact under the row. |
 | `--json` | JSON (`{"total": n, "results": [...]}`) for other programs. |
 
