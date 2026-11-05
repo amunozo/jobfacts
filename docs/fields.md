@@ -92,6 +92,9 @@ in the perks → `unclear` (a named region wins over perk wording). Office citie
 of the home country next to "remote" ("Zürich / Remote", "Hamburg oder
 Nürnberg, oder remote") name no region → `not_stated`. A line that only says
 where a remote worker may live ("Remote - United States") is not an office.
+Decided case (owner, 2026-11-05): "Remote / London, UK / Cambridge, UK" with
+pay only in GBP and USD stays `not_allowed` (places in one other country next to
+"remote"); single-country remote ("Remote - United States") stays `not_allowed`.
 Code rule: if `work_mode` is not `remote`, the value is `not_applicable`.
 
 ## 2. Language requirement

@@ -498,3 +498,14 @@ Newest at the bottom.
   of daily use (the replay gives the same answer now). Precision is not
   measured yet.
 
+## 2026-11-05: Remote lists without Switzerland stay "not allowed"
+- **What:** no change to `remote_from_switzerland`. A remote posting whose
+  places or countries leave out Switzerland ("Remote - United States",
+  "Remote / London, UK / Cambridge, UK") stays `not_allowed` and is filtered out.
+- **Why:** the recall replay found one wanted job lost this way. Making such
+  lists `unclear` would add about 147 of 590 search results (+25%), mostly
+  US-only remote roles, to catch it.
+- **Rejected:** every list without Switzerland -> `unclear` (+147 results);
+  only office-place lists like the one above -> `unclear` (narrow, but the
+  owner preferred no change).
+
