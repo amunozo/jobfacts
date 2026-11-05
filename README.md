@@ -159,7 +159,8 @@ Each design decision, with the alternatives rejected, is in
    same role.
 
 **Later (not planned yet):**
-- More feed types, each only after a terms check: prospective.ch JSON
+- More feed types, each only after a terms check: SAP SuccessFactors (many
+  large Swiss employers: insurers, industry, EPFL), JOIN, prospective.ch JSON
   (Swiss federal administration, several universities), Oracle Recruiting
   and HiBob. Career sites readable only as page HTML stay out.
 - Keep each posting's original HTML so the labelling page can show real
