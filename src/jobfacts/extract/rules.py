@@ -65,6 +65,23 @@ def _clean(title: str) -> str:
     return GENDER_TAG.sub(" ", _NOT_RANK.sub(" ", t))
 
 
+_FOUNDING = re.compile(r"founding|fondat|gr[üu]nder", re.IGNORECASE)
+
+
+def level_words(title: str) -> frozenset[str]:
+    """The level words of a title: a level name for intern/junior/mid/senior words (so "Sr"
+    and "Senior" agree), the word itself for rank words (staff, principal, lead, head, ...),
+    and "founding". Used to tell "Senior X" and "Staff X" apart when matching titles."""
+    t = _clean(title)
+    found: set[str] = set()
+    for level, rx in _LEVEL_RE.items():
+        for m in rx.finditer(t):
+            found.add(m.group(0).casefold() if level == "staff_principal" else level)
+    if _FOUNDING.search(t):
+        found.add("founding")
+    return frozenset(found)
+
+
 def checked_title_level(title: str, level: str) -> str:
     """`level` if the title has a keyword for it, else `not_stated`."""
     if level == "not_stated" or level not in _LEVEL_RE:

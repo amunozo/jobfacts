@@ -2,6 +2,7 @@
 
 import argparse
 import sys
+from datetime import date
 from pathlib import Path
 
 from jobfacts import db
@@ -196,6 +197,13 @@ def main(argv: list[str] | None = None) -> int:
     sea.add_argument("--limit", type=int, default=20)
     sea.add_argument("--evidence", action="store_true", help="print supporting sentences")
     sea.add_argument("--json", action="store_true", help="print JSON for other programs")
+    see = sub.add_parser(
+        "search-eval", help="recall check: would the search have shown past applications?"
+    )
+    see.add_argument("--applications", type=Path, required=True, help="folder of applications")
+    see.add_argument("--dates", type=Path, required=True, help="JSON: folder key -> YYYY-MM-DD")
+    see.add_argument("--since", type=date.fromisoformat, help="only applications from YYYY-MM-DD")
+    see.add_argument("--out", type=Path, help="report path (default data/private/reports)")
     imp = sub.add_parser("import-applications", help="import application job descriptions")
     imp.add_argument("path", type=Path)
     sub.add_parser("select-test-set", help="write data/private/test_set.jsonl")
@@ -272,6 +280,17 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.command == "search":
             return _search(conn, args)
+        if args.command == "search-eval":
+            from jobfacts import search_eval
+
+            try:
+                result = search_eval.run(conn, args.applications, args.dates, args.since, args.out)
+            except (OSError, ValueError) as e:
+                print(f"error: {e}", file=sys.stderr)
+                return 2
+            print(result.summary)
+            print(f"\nreport: {result.path}")
+            return 0
         if args.command == "import-applications":
             from jobfacts.applications import import_applications
 

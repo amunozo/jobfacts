@@ -476,3 +476,25 @@ Newest at the bottom.
   publishing the history as it was (old versions of the working files would
   stay readable); one squashed commit (loses the real history); adding the
   accuracy gate to CI now (it needs the private labels; Milestone 2).
+
+## 2026-11-05: Search recall measured by replaying past applications
+- **What:** `jobfacts search-eval` treats the owner's past applications as the
+  jobs they wanted and replays each one against the database: it finds the
+  posting (job id from the link, else company and title) and reports the first
+  step that would have lost it (employer not collected, posting not collected,
+  not relevant, outside the extraction scope, not extracted, dropped by a
+  filter) or `found`. Recall is reported within scope (Swiss or remote
+  postings) and for all wanted jobs at covered employers; jobs at employers we
+  do not read, and applications from before collection started, are counted
+  apart. Fuzzy titles need the same level words (senior, staff, ...) and a
+  0.9 ratio; postings closed before the application or first seen more than
+  30 days after it do not match; duplicates are judged by the posting search
+  shows.
+- **Why:** it measures recall on real wanted jobs with no labelling work, and
+  shows where jobs are lost. First result: the search keeps almost every
+  wanted job within scope; most misses are employers we do not read yet.
+- **Rejected:** writing 10-15 searches and marking ~30 results each by hand
+  (owner time; gives precision too, which applications cannot); waiting a week
+  of daily use (the replay gives the same answer now). Precision is not
+  measured yet.
+

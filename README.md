@@ -48,6 +48,11 @@ the first thing to check, and today that means reading every posting.
   fixed-term) and groups duplicate postings. See `docs/search.md`.
 - **Evaluation.** A local labelling web app, reference labels, and an
   accuracy report per field and per posting language (`docs/labelling.md`).
+- **Search recall check.** `jobfacts search-eval` replays past job
+  applications against the database and reports, for each wanted job, the step
+  that would have lost it (employer not collected, not relevant, filtered, ...)
+  and the recall. The applications themselves stay private
+  (`docs/search.md`).
 - **Daily update.** `jobfacts daily` runs the whole update in one command
   (database, migrations, collection, relevance, extraction). It is started by
   hand for now.

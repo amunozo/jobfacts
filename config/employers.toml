@@ -408,6 +408,11 @@ ats = "greenhouse"
 board_id = "ewor"
 
 [[employer]]
+name = "EWOR"
+ats = "teamtailor"
+board_id = "eworgmbh"
+
+[[employer]]
 name = "EggAI"
 ats = "greenhouse"
 board_id = "eggai"

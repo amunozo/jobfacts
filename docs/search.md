@@ -97,3 +97,81 @@ $ jobfacts search "NLP" --remote --evidence --limit 1
 $ jobfacts search --canton ZH --seniority junior,mid --new-days 7
 $ jobfacts search "data" --french-max none --json
 ```
+
+## Recall check (search-eval)
+
+```
+uv run jobfacts search-eval --applications DIR --dates FILE [--since YYYY-MM-DD] [--out PATH]
+```
+
+A replay of the search on the past: the jobs the owner applied to are the jobs they wanted, so
+for each application the command decides whether the search would have shown it and, if not,
+at which step it was lost.
+
+Inputs:
+- `DIR` holds `<Company>/<Role>/job_description.md` (Role may be nested). The key of an
+  application is its folder path relative to `DIR`, for example `Acme/ML Engineer`. The first
+  line of the file is often the link of the posting.
+- `FILE` is a JSON object from that key to the application date (`YYYY-MM-DD`). Applications
+  without a date are listed as "no date" and skipped. `--since` keeps applications on or after
+  that date.
+- Postings imported from the application files (`origin = 'application'`) are ignored; only
+  board postings count, open or closed.
+- Output: a Markdown report (default `data/private/reports/search_eval_<today>.md`, which is
+  git-ignored) and the summary table on stdout.
+
+Matching an application to a board posting:
+1. By link: a stable job id is taken from the application link and from each posting's URL and
+   `source_job_id` (Ashby, Greenhouse including `gh_jid=`, Lever, SmartRecruiters, Workable,
+   Recruitee, Personio, Teamtailor, Workday). Equal ids match. Recruitee slugs and Workday
+   requisitions are only unique within a board or tenant, so those keys carry it. Links on
+   custom domains are recognised only for stored postings, so they fall through to step 2.
+2. Otherwise by company and title. The company folder is matched to the name of a board
+   employer after casefolding and removing accents, punctuation and legal suffixes (AG, SA,
+   GmbH, Inc, ...); one name inside the other as whole words also counts (`name_contained`),
+   if the shorter one has two words or five characters. A link on a known job board also names
+   the employer through its board id (`url_board`). Among that employer's postings the title
+   must be equal after `grouping.title_key`, or similar: `difflib` ratio of at least 0.9
+   (`TITLE_RATIO`) and the same level words (`extract.rules.level_words`: intern, junior,
+   senior, staff, principal, lead, head, founding, ...), so "Senior X" never matches "Staff X"
+   or "X". The posting first seen closest to the application date wins.
+   Only postings that could be the opening applied to are considered: not closed before the
+   application date, and, when the employer's board had been read successfully on or before
+   that date, not first seen more than 30 days after it (`REPOST_DAYS`; later ones are reposts).
+   Dates are Europe/Zurich dates.
+
+The posting that decides the outcome is the one search shows. Search groups postings of the same
+employer with the same `title_key`, orders them for an empty query by `first_seen_at DESC, id`,
+and the owner-view filters look at the shown posting only. So the matched posting's whole group
+is checked, and the group is judged by its first posting (in that order) that reaches the filters
+(relevant, extracted); a group-mate with other facts can decide the result. If no group member
+gets that far, the furthest failure is reported. When title matching finds postings with
+different titles, the group with the furthest outcome wins.
+
+Outcome per application, the first failing step:
+
+| Outcome | Meaning |
+|---|---|
+| `not_covered` | No board employer matches: a source gap, not a search error. |
+| `unknown_before_collection` | Employer covered, no matching posting, and the application predates our first successful read of that board (or the board was never read): the posting may have closed before we started. |
+| `not_collected` | Same, but the board had been read before the application: a collector or matching miss. |
+| `no_relevance` / `not_relevant` | Posting found; no Jev relevance row, or the row says not relevant (the score is given). |
+| `not_eligible` | Relevant and without an extraction, but extraction skips it by design (decision 7a, `PostingText.is_extraction_eligible`): no Swiss location and not remote. The detail is the posting's location. A posting that does have an extraction is judged by the extraction instead. |
+| `not_extracted` | Relevant and eligible, but no successful Jev search extraction for the current text. For an open posting an extraction made for older text counts as none (search does not show it; detail "extraction is for older text"); for a closed posting the latest extraction is used and noted. |
+| `filtered` | Extracted but dropped by the owner-view filters (`search_eval.filter_reason`): German `required_fluent`; fixed-term contract; remote but not allowed from Switzerland with no Swiss office; not remote and no Swiss office. |
+| `found` | Would have been shown. The report adds whether the posting was first seen before, on or after the application date. |
+
+Two recall figures, each with a 95% Wilson interval:
+- **Recall within scope (Swiss or remote postings)** = found / (found + not_collected +
+  no_relevance + not_relevant + not_extracted + filtered): how many of the postings the search
+  is built to cover it would have shown.
+- **Recall of all wanted jobs at covered employers** = found / (the same base + not_eligible):
+  the same, but counting relevant postings outside Switzerland that are not remote, which
+  extraction skips by design.
+
+`not_covered` and `unknown_before_collection` are left out of both bases and reported with their
+counts. When the application predates the employer's first successful read, a `found` row says
+"collected from <date> (after the application; collection started then)" instead of comparing
+the first-seen date. The report also counts applications per link
+source (linkedin, hiring.cafe, ats-direct, other, none), has one table per non-found outcome,
+and lists the `not_covered` companies so name-matching misses can be spotted by eye.
