@@ -32,9 +32,11 @@ def parse_detail_text(detail: dict) -> str:
 
 def fetch(client, board_id: str, extra: dict) -> list[Posting]:
     items, offset = [], 0
+    base = f"https://api.smartrecruiters.com/v1/companies/{board_id}/postings"
+    # Optional per-employer country: the API filters, on every page.
+    country = f"&country={extra['country'].lower()}" if extra.get("country") else ""
     while True:
-        base = f"https://api.smartrecruiters.com/v1/companies/{board_id}/postings"
-        data = get_json(client, f"{base}?limit=100&offset={offset}")
+        data = get_json(client, f"{base}?limit=100&offset={offset}{country}")
         items.extend(data.get("content", []))
         offset += 100
         if offset >= data.get("totalFound", 0) or not data.get("content"):

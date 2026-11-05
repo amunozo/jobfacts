@@ -1,5 +1,6 @@
 # Employers whose public job boards the collector reads.
 # Fields: name, ats, board_id; optional: eu = true (Lever EU host), url = full feed address (Teamtailor custom domain).
+# country = "CH" (SmartRecruiters and Ashby only; ISO 3166-1 alpha-2, any case): keep only postings located in that country. Remote roles registered in another country are dropped too. If nothing is left, the empty-response guard keeps old postings open (see docs/collector.md).
 # Workday (opt-in, sitemap + JSON-LD only, see notes/workday_terms.md): board_id = tenant, wd = host number, site = career site name, prefilter = false to read every page.
 
 [[employer]]
@@ -787,3 +788,21 @@ name = "QoQa"
 ats = "teamtailor"
 board_id = "qoqa"
 url = "https://careers.qoqa.jobs/jobs.rss"
+
+[[employer]]
+name = "AECOM"
+ats = "smartrecruiters"
+board_id = "AECOM2"
+country = "CH"
+
+[[employer]]
+name = "Sopra Steria"
+ats = "smartrecruiters"
+board_id = "SopraSteria1"
+country = "CH"
+
+[[employer]]
+name = "BJAK"
+ats = "ashby"
+board_id = "bjakcareer"
+country = "CH"

@@ -236,3 +236,66 @@ def test_teamtailor():
     assert p.location_raw == "Lausanne, Switzerland / (hybrid)"
     assert p.description_text == "Entraîner des modèles."
     assert p.posted_at is not None
+
+
+def test_smartrecruiters_country_on_every_page(monkeypatch):
+    urls = []
+
+    def fake_get_json(client, url):
+        urls.append(url)
+        if "/postings?" in url:
+            offset = int(url.split("offset=")[1].split("&")[0])
+            ids = [f"j{offset + i}" for i in range(100 if offset == 0 else 1)]
+            return {"totalFound": 101, "content": [{"id": i, "name": "T"} for i in ids]}
+        return {}
+
+    monkeypatch.setattr(smartrecruiters, "get_json", fake_get_json)
+    postings = smartrecruiters.fetch(None, "acme", {"country": "CH"})
+    pages = [u for u in urls if "/postings?" in u]
+    assert len(postings) == 101 and len(pages) == 2
+    assert all(u.endswith("&country=ch") for u in pages)
+    urls.clear()
+    smartrecruiters.fetch(None, "acme", {})
+    assert not any("country" in u for u in urls)
+
+
+def _ashby_jobs():
+    def job(id, location, country=None, secondary=()):
+        item = {"id": id, "title": id, "location": location, "secondaryLocations": []}
+        if country:
+            item["address"] = {"postalAddress": {"addressCountry": country}}
+        for text in secondary:
+            item["secondaryLocations"].append({"location": text})
+        return item
+
+    return {
+        "jobs": [
+            job("addr", "Somewhere", country="Switzerland"),
+            job("second", "Remote", secondary=["Zürich"]),
+            job("london", "London", country="United Kingdom", secondary=["Remote UK"]),
+        ]
+    }
+
+
+def test_ashby_country_filter():
+    ids = [p.source_job_id for p in ashby.parse(_ashby_jobs(), "ch")]
+    assert ids == ["addr", "second"]
+    assert len(ashby.parse(_ashby_jobs())) == 3
+
+
+def test_ashby_country_filter_keeps_nothing_when_none_match():
+    data = {"jobs": [j for j in _ashby_jobs()["jobs"] if j["id"] == "london"]}
+    assert ashby.parse(data, "CH") == []
+
+
+def test_country_on_unsupported_system_is_a_config_error(tmp_path):
+    import pytest
+
+    from jobfacts.collect import store
+
+    path = tmp_path / "employers.toml"
+    path.write_text(
+        '[[employer]]\nname = "Example"\nats = "greenhouse"\nboard_id = "example"\ncountry = "CH"\n'
+    )
+    with pytest.raises(ValueError, match="not supported for ats = 'greenhouse'"):
+        store.load_employers(None, path)

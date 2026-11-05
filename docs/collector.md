@@ -51,6 +51,26 @@ throwaway schema `test_jobfacts` in the compose database and are skipped
   really closed every role, its postings stay open until a non-empty read;
   check `board_reads` errors if a board keeps returning empty.
 
+## Country filter (`country = "CH"`)
+
+An optional employer field (ISO 3166-1 alpha-2, any case) that keeps only postings
+located in one country. It is supported for two job systems; any other system is a
+configuration error raised when `config/employers.toml` is loaded.
+
+- SmartRecruiters: the code is sent to the official API as `country=ch` on every page.
+- Ashby: the API returns all jobs, so the filter runs in the collector. A job is kept when
+  its primary or any secondary location is in the country: the structured
+  `address.postalAddress.addressCountry` when present, else the location text (country
+  names such as Switzerland, Schweiz, Suisse, Svizzera, and for CH the Swiss place matcher
+  in `jobfacts.locations`).
+- Trade-off: a remote role registered in another country is dropped, even if the
+  employer would hire in Switzerland. Postings dropped by the filter count as missing,
+  so previously stored ones are closed.
+- If the filtered list is empty, the empty-response guard in `run.py` applies: when the
+  employer has open postings, the read counts as failed ("empty response ... nothing
+  closed") and they stay open until a non-empty read; with none open, the empty read is
+  stored normally.
+
 ## Workday (opt-in, sitemap + JSON-LD only)
 
 Employers with `ats = "workday"` (`board_id` = tenant, `wd` = host number, `site` = career

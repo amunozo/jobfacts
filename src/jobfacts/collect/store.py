@@ -12,6 +12,10 @@ from jobfacts.collect.posting import Posting
 EMPLOYERS_FILE = Path(__file__).resolve().parents[3] / "config" / "employers.toml"
 
 
+# Job systems whose collector can keep only one country's postings (`country = "CH"`).
+COUNTRY_FILTER_ATS = ("smartrecruiters", "ashby")
+
+
 @dataclass
 class Counts:
     new: int = 0
@@ -22,9 +26,23 @@ class Counts:
 def load_employers(conn: psycopg.Connection, path: Path = EMPLOYERS_FILE) -> None:
     """Upsert employers from the TOML file. Employers no longer listed become inactive."""
     entries = tomllib.loads(path.read_text())["employer"]
+    for entry in entries:
+        if "country" in entry:
+            country = entry["country"]
+            if not (isinstance(country, str) and len(country) == 2 and country.isalpha()):
+                raise ValueError(
+                    f"{entry['name']}: country must be a two-letter ISO code, got {country!r}"
+                )
+            if entry["ats"] not in COUNTRY_FILTER_ATS:
+                raise ValueError(
+                    f"{entry['name']}: `country` is not supported for ats = {entry['ats']!r} "
+                    f"(only {', '.join(COUNTRY_FILTER_ATS)})"
+                )
     keys = []
     for entry in entries:
         extra = {k: v for k, v in entry.items() if k not in ("name", "ats", "board_id")}
+        if "country" in extra:
+            extra["country"] = extra["country"].upper()
         conn.execute(
             "INSERT INTO employers (name, ats, board_id, extra, active) "
             "VALUES (%s, %s, %s, %s, true) "
