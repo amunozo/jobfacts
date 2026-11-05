@@ -8,11 +8,13 @@ from jobfacts import db
 
 @pytest.fixture
 def conn():
-    """A connection to a throwaway schema in the compose database; skipped if unreachable."""
+    """A throwaway schema in the compose database; skipped if unreachable, fails if CI is set."""
     url = os.environ.get("DATABASE_URL", db.DEFAULT_URL)
     try:
         connection = psycopg.connect(url, connect_timeout=3)
     except psycopg.OperationalError as error:
+        if os.environ.get("CI"):
+            pytest.fail(f"PostgreSQL unreachable in CI ({error})")
         pytest.skip(f"PostgreSQL unreachable ({error}); run `docker compose up -d`")
     schema = "test_jobfacts"
     connection.execute(f"DROP SCHEMA IF EXISTS {schema} CASCADE")

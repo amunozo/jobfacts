@@ -1,219 +1,185 @@
-# jobfacts (working name)
+# jobfacts
 
 **The facts a job posting hides.** jobfacts collects AI and data job postings
-every day, straight from employers' public job boards, and finds the roles
-someone based in Switzerland can actually take. For each posting it extracts
-the facts that decide this, such as the language requirement, whether the role
-is on-site, hybrid or remote, whether remote work from Switzerland is allowed,
-and the real seniority. Each fact comes with the sentence from the posting that
-supports it, so any answer can be checked in seconds.
+straight from employers' public job boards and finds the roles someone based in
+Switzerland can actually take. For each posting it extracts the facts that
+decide this: the German or French requirement, whether the role is on-site,
+hybrid or remote, whether remote work from Switzerland is allowed, where the
+office is, and the real seniority. Each fact points to the sentence in the
+posting that supports it, so any answer can be checked in seconds. When a
+posting does not state a fact, jobfacts stores "not stated" and never guesses.
 
-Status: planning. Nothing is built yet. See `HANDOFF.md` for the current state.
+**Status (5 November 2026): Milestone 1 of 4, in progress.** The collector,
+the extraction and a command-line search work, and the author uses them for
+their own job search. It is a personal project, not a hosted service. See
+"Not built yet" below.
 
-## Why it exists
+## Why
 
-Swiss AI job boards such as swissaijob.ch (about 550 roles from 144 companies
-in November 2026) list roles with skill tags, a seniority level and an
-estimated salary. They do not say whether German is required, whether a remote
-role can be done from Switzerland, or how long the commute is. Their seniority
-and salary estimates are often wrong. For international candidates in
-Switzerland, the language requirement is usually the first thing to check, and
-today it means reading every posting.
+Swiss AI job boards list skills, a seniority level and an estimated salary.
+They do not say whether German is required or whether a "remote" role can be
+done from Switzerland, and their seniority estimates are often wrong. For
+international candidates in Switzerland the language requirement is usually
+the first thing to check, and today that means reading every posting.
 
-The project has a second purpose: it is a portfolio project. It is built to
-show, with measured results, the skills that AI-engineering job ads ask for:
-a data pipeline and SQL, an LLM application whose accuracy is measured, search,
-an API, automated tests, cloud deployment and monitoring.
+## What works today
 
-## What it does (first version: search)
+- **Collection.** Reads the official public job-board APIs and feeds of about
+  100 employers (about 140 boards): Greenhouse, Lever, Ashby, SmartRecruiters,
+  Recruitee, Workable, Personio, Teamtailor and Workday (sitemap and
+  structured data only). Postings go into PostgreSQL; postings that disappear
+  are marked closed. A run on 4 November 2026 read 141 boards with 0 failures
+  (5,583 open postings). Each board is committed as it is read, so a crash
+  loses at most one board. See `docs/collector.md`.
+- **Relevance filter.** A cheap classifier model scores whether a posting is
+  an AI, ML, data or research role from its title and first sentences. The
+  threshold (0.2) favours recall: a wrong row costs seconds, a missed job
+  costs more.
+- **Fact extraction.** Each field has a fixed list of allowed values
+  (`docs/fields.md`). The posting is split into numbered sentences and the
+  model picks values and supporting sentence numbers, so a quote cannot be
+  invented. Deterministic code rules handle what models do badly (year
+  thresholds, place names from the official swisstopo register). The
+  extractor is Jev (TypeSafe), chosen over DeepSeek and Mistral after
+  measuring all three on the same postings: similar accuracy to DeepSeek at
+  about a third of the cost.
+- **Search.** `jobfacts search` combines PostgreSQL full-text search with
+  filters (canton, remote from Switzerland, maximum German level, no
+  fixed-term) and groups duplicate postings. See `docs/search.md`.
+- **Evaluation.** A local labelling web app, reference labels, and an
+  accuracy report per field and per posting language (`docs/labelling.md`).
+- **Daily update.** `jobfacts daily` runs the whole update in one command
+  (database, migrations, collection, relevance, extraction). It is started by
+  hand for now.
 
-The first version is only about **finding roles**. A user can search open AI
-and data roles by text and filter them by:
+## Measured accuracy
 
-- **Where the work happens:** a Swiss city, or remote.
-- **Remote from Switzerland:** remote roles are included only when the posting
-  explicitly allows working from Switzerland (see "Remote rules" below).
-- **Language requirement:** German or French required, and at what level
-  ("fluent", "C1", "nice to have", "not mentioned").
-- **Seniority:** judged from what the posting asks for (years of experience,
-  responsibilities), not only from the title.
+Held-out set of 50 postings (25 English, 13 German, 12 French) that were not
+used while writing the prompts and rules (those were tuned on a separate
+100-posting test set). Run of 4 November 2026.
 
-Every extracted fact is stored with the exact quote that supports it, or as
-"not stated" when the posting says nothing. The system never guesses a fact
-the posting does not contain.
+| field | overall | en | de | fr |
+|---|---|---|---|---|
+| relevant (AI/data role) | 88% | 88% | 85% | 91% |
+| work mode | 96% | 100% | 92% | 92% |
+| remote from Switzerland | 96% | 92% | 100% | 100% |
+| office canton(s) | 92% | 88% | 92% | 100% |
+| office place(s) | 96% | 96% | 92% | 100% |
+| German requirement | 96% | 100% | 100% | 83% |
+| French requirement | 98% | 100% | 100% | 92% |
+| minimum years | 100% | 100% | 100% | 100% |
+| title level | 98% | 96% | 100% | 100% |
+| contract type | 98% | 100% | 100% | 92% |
+| seniority | 100% | 100% | 100% | 100% |
 
-### Remote rules
+How to read it:
 
-A remote role counts as "allowed from Switzerland" only when the posting:
+- **The reference labels are model labels checked by a person, not labels
+  written from scratch by hand.** Three models (GPT-6 Astra, Gemini 4 Argon,
+  Claude Opus 5.5) label each posting independently; where they disagree, the
+  author decides. In a 12-posting pilot, this reference matched the author's
+  own hand labels on 95-96% of answers. No independent audit yet.
+- **The set is small.** On 50 postings, 96% has a 95% confidence interval of
+  about 87-99%; per language the intervals are wider still.
+- **Cost:** about $0.0005 per posting for extraction (Jev).
 
-- names Switzerland as an allowed country (or lists Swiss remote), or
-- says the role can be done from anywhere in the world.
+## Not built yet
 
-Postings that say "remote in Europe", "EU", "EMEA" or "CET time zone" without
-naming Switzerland are marked **unclear**, not allowed. Many such roles hire
-only through EU entities, and Switzerland is not in the EU. Unclear roles can
-be shown on request, labelled "check first". Postings that list countries
-without Switzerland, or only allow one other country, are excluded.
+- Search by meaning (embeddings), an HTTP API and a web page (Milestone 2).
+- Deployment, a scheduled daily run, monitoring, and an accuracy gate in CI
+  (Milestone 2; the labels are private, so the gate needs a private runner or
+  stored results).
+- PhD and stated-salary fields, salary estimates (Milestone 3).
+- Commute time and relisted roles (Milestone 4).
 
-## How it works
+## Run it
 
-1. **Collect.** A scheduled job reads each employer's public job board through
-   its official API (Greenhouse, Lever, Ashby, SmartRecruiters, Workable,
-   Recruitee, Workday and similar). The starting employer list comes from the
-   private job-search watchlist (about 130 employers), plus remote-first
-   employers outside Switzerland. New postings go into PostgreSQL. Duplicates
-   are merged, and postings that disappear are marked closed so search only
-   shows open roles.
-2. **Keep only relevant roles.** A first filter keeps AI, ML, data and
-   research roles and drops the rest.
-3. **Extract facts.** An LLM reads each new posting and fills a fixed set of
-   fields, each with a supporting quote. The output is checked against a schema;
-   broken output is retried or flagged, never silently stored.
-4. **Search.** Keyword search first (PostgreSQL full-text search), then search
-   by meaning (embeddings stored with pgvector), always combined with the
-   filters above.
-5. **Serve.** A FastAPI service answers searches for a simple web page and for
-   other programs.
-6. **Run and watch.** The service runs in Docker on one cloud provider.
-   Monitoring tracks failed collections, extraction errors, cost per posting
-   and response time.
+Needs Python 3.12, [uv](https://docs.astral.sh/uv/) and Docker.
 
-## How we know it works
+```bash
+docker compose up -d          # PostgreSQL 16 with pgvector on port 5433
+uv sync
+cp .env.example .env          # then add your API keys (see the file)
+uv run jobfacts migrate
+uv run jobfacts collect       # about 1.5 minutes
+uv run jobfacts relevance
+uv run jobfacts extract --extractor jev --for-search
+uv run jobfacts search "machine learning" --canton VD --german-max intermediate
+```
 
-The evaluation is the core of the project, not an extra.
+`uv run jobfacts daily` runs the update steps in order. Collection needs no
+API key; relevance and extraction need `TYPESAFE_API_KEY`.
 
-- **Test set:** about 150 postings, labelled by hand by the person who uses
-  the tool every day. Each label is a field value plus the supporting
-  sentence. Postings in German, French and English are all included.
-- **Labelling is mostly one-time per field:** the same labels are reused when
-  the model or prompt changes. New fields (Milestones 3 and 4) need their own
-  small rounds of about 50 postings, and a monthly spot check of 10-20 new
-  postings catches drift (employers changing formats, model updates).
-- **Extraction accuracy:** measured per field and per posting language.
-- **Model choice:** at least two LLMs compared on accuracy and on cost per
-  posting.
-- **Search quality:** a small set of real searches with the roles that should
-  come back, checked against what the system returns.
-- **Automatic checks on every change:** unit tests plus the extraction test
-  set run in GitHub Actions; a change that lowers accuracy is blocked.
-- **Daily health:** each run records how many boards were read, how many
-  failed, how many postings were new, closed or extracted, and the cost.
+## Tests and CI
 
-## Scope rules
+```bash
+uv run ruff check . && uv run ruff format --check . && uv run pytest
+```
 
-- Public data only. Postings are summarised with a link back to the employer,
-  never copied in full.
-- No personal data. Nothing from the private job-search repository
-  (applications, CVs, notes, outcomes) goes into this repository.
-- No accounts, no payments, no application tracking in the first version.
-- Each source's terms of use are checked before it is added.
+About 500 tests; the database tests use the compose database and are skipped
+locally when it is not running. GitHub Actions runs the same checks, with a
+PostgreSQL service, on every push and pull request; there the database tests
+fail instead of being skipped.
+
+## Design rules
+
+- **Remote from Switzerland** counts only when the posting names Switzerland
+  (or Swiss remote) or allows work from anywhere. "Remote in Europe", "EU",
+  "EMEA" or "CET time zone" without Switzerland is **unclear**, not allowed:
+  many such roles hire only through EU entities.
+- **Sources:** only official, documented job-board APIs and feeds whose terms
+  allow the use; each source is checked before it is added. No scraping of
+  sites that forbid it.
+- **No guessing:** a fact the posting does not state is stored as "not stated".
+- **Evaluation first:** every field has allowed values, a supporting quote and
+  labelled test cases before search uses it.
+
+Each design decision, with the alternatives rejected, is in
+`docs/decisions.md`.
 
 ## Milestones
 
-**Milestone 1 (about two weeks): collection and the first facts.**
-- Collector for the main job-board APIs, writing to PostgreSQL once a day
-  (`uv run jobfacts daily` runs the whole daily update: database, migrate,
-  collect, relevance, extraction for search).
-- Relevance filter for AI and data roles.
-- Extraction of three fields: work mode and remote eligibility, language
-  requirement, seniority. Each with a quote.
-- A small local labelling web app: it shows a posting next to the fields,
-  the owner picks each value and marks the supporting sentence, and labels
-  are saved to `data/private/`. It has a blind mode (model answers hidden)
-  for the first 30 postings, then shows the model's pre-filled answers to
-  confirm or correct.
-- 100 labelled postings and an accuracy table per field.
-- A command-line search with these filters.
-- Done when the daily run has worked for a week and the search is used instead
-  of reading postings by hand.
-
-**Milestone 2: a usable service.**
-- Search by meaning (pgvector) next to keyword search.
-- FastAPI service and a simple web page. The API is designed to be called
-  by other programs too, first the owner's private job-search tools.
-- The web page's look is inspired by SBB: their design tokens and icons
-  (openly licensed) in plain HTML and CSS, a free font instead of SBB's, no
-  SBB logo or brand marks (see `docs/decisions.md`).
-- GitHub Actions with the accuracy gate; Docker; deployment on one cloud
-  provider; monitoring.
-- Load test with a stated result (response time at a given request rate).
-
-**Milestone 3: more facts and salary.**
-- New fields, each with a quote: minimum years of experience, PhD required or
-  preferred, salary when stated (amount, currency, workload percentage).
-- A salary estimate when the posting states none, built from stated salaries
-  of similar postings (same role family, seniority and region) and from public
-  Swiss pay scales where their terms allow it. Each estimate shows how many
-  comparable postings support it; with too few, it says "not enough data"
-  instead of guessing.
-- The estimate is measured by hiding the stated salary of known postings and
-  comparing; the error is published.
-- Risk: few Swiss postings state a salary, so the comparison set starts small.
-  The posting history grows every day.
-
-**Milestone 4: commute and relisted roles.**
-- Office location from the posting or the employer's site, otherwise the city.
-- Door-to-door public transport time from a home address, using Swiss open
-  timetable data; checked against the SBB app on 30 postings.
-- Relisted roles: link a new posting to an earlier one at the same employer
-  when the duties and team match, even if the title changed. Measured on
-  pairs of postings labelled by hand.
-
-Milestones 3 and 4 start only after Milestones 1 and 2 are finished.
+1. **Collection and the first facts** (in progress): collector, relevance
+   filter, extraction with quotes, labelled postings with an accuracy table,
+   command-line search. Done when the daily run has worked for a week and the
+   search replaces reading postings by hand.
+2. **A usable service:** search by meaning (pgvector), a FastAPI service and a
+   simple web page, Docker deployment on one cloud provider, monitoring, an
+   accuracy gate in CI, a load test with a stated result.
+3. **More facts and salary:** PhD, stated salary, and a
+   salary estimate from comparable postings that says "not enough data"
+   instead of guessing, with its error measured and published.
+4. **Commute and relisted roles:** door-to-door public transport time from
+   Swiss open timetable data; linking a new posting to an earlier one for the
+   same role.
 
 **Later (not planned yet):**
 - More feed types, each only after a terms check: prospective.ch JSON
   (Swiss federal administration, several universities), Oracle Recruiting
-  (Canton of Vaud) and HiBob. Career sites readable only as page HTML stay
-  out (see `docs/decisions.md`).
-- Keep each posting's original HTML (new column, re-collect) so the
-  labelling page can show real formatting such as bold, links and heading
-  levels. Today only the plain text is stored.
+  and HiBob. Career sites readable only as page HTML stay out.
+- Keep each posting's original HTML so the labelling page can show real
+  formatting. Today only the plain text is stored.
 - An MCP server (the standard way for LLM agents to call tools) wrapping the
-  search API, so assistants such as Claude can search postings directly.
-- Language requirements for English and Italian (Milestone 1 extracts
-  German and French only).
-- Posting language as a search filter or a column in results (already
-  measured by code; a French posting hints at French at work even when no
-  requirement is stated). Owner idea, 4 Nov 2026.
-- Log jobs the owner applies to (or wants) that scored below the relevance
-  threshold: free, unbiased labels for relevance misses. If the same kind of
-  role keeps appearing, give the relevance question more of the posting
-  (today: title and first sentences) rather than lowering the threshold.
-- Private mode: fit against a CV, and links to the private job-search
-  repository (for example, `job_watch` reading from this database). This
-  stays out of the public code.
-- **Decision Apertus trigger.** decision_apertus (a separate project: an
-  open decision model on Apertus) starts early if the accuracy report shows
-  Jev clearly weaker in German or French than in English on some field
-  (about 10+ points, beyond the 95% intervals) and sending those postings
-  to another extractor does not fix it. Italian cannot be judged until the
-  test set has Italian postings.
+  search API.
+- Language requirements for English and Italian (Milestone 1 extracts German
+  and French only).
+- Posting language as a search filter or a result column.
+- Record wanted jobs that scored below the relevance threshold, as free labels
+  for relevance misses.
 
-## Publishing and licence
+## Data and licence
 
-- The repository stays private during Milestone 1.
-- When Milestone 1 works, the code is published under the AGPL-3.0 licence,
-  with a write-up of the results (accuracy table, architecture, costs).
-  AGPL lets anyone use and change the code, but anyone running a modified
-  version as a public service must publish their changes.
-- The database and the labelled postings stay private: the labels contain
-  quotes from postings, and the data is the valuable part.
-- If a paid service ever exists, it charges for hosted features (alerts,
-  saved searches), never for the code. No decision on charging is made now.
+- Code: [GNU AGPL-3.0](LICENSE). Anyone may use and change it; anyone running
+  a modified version as a public service must publish their changes.
+- The posting database and the labelled postings are not published: the
+  labels contain quotes from postings.
+- `config/swiss_places.csv` is built from the official swisstopo locality
+  register, (c) swisstopo, open data redistributed with attribution
+  (`scripts/build_places.py` rebuilds it).
+- Postings belong to their employers; jobfacts links back to each one.
 
 ## Stack
 
-Python 3.12, PostgreSQL with pgvector, FastAPI, Docker, pytest and GitHub
-Actions. The LLM is called through an API; the provider is chosen by
-measured accuracy and cost. The cloud provider and monthly budget are still
-open (see `HANDOFF.md`).
-
-## Earlier attempts (for reference)
-
-- `~/projects/personal/code/swiss_remote_job_radar/` (March 2026): a paid
-  daily feed. Its filter presets (`config/presets/`) may be reused; its paid
-  product plan is not part of this project.
-- This folder held a July 2026 plan for a CV-matching tool on a generic
-  European job board. It was removed on 2 November 2026 (moved to the system
-  trash).
+Python 3.12, PostgreSQL 16 with pgvector, psycopg with plain SQL migrations,
+httpx, pytest, ruff, uv, Docker Compose and GitHub Actions. LLM providers:
+TypeSafe (Jev), OpenRouter (comparison models and the Jev backup route).

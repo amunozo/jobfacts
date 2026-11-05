@@ -220,8 +220,8 @@ Newest at the bottom.
 - **What:** the owner labels English and French on the labelling page (it
   now serves only `en,fr`; the 30 blind postings are the first 30 served).
   The 26 German test postings are labelled independently by Opus 5.5 (Claude
-  Code subagent), GPT-6 Astra (pi) and Gemini 4 Argon
-  (pi, opencode-go). Each gives value, sentence ids and an English
+  Code subagent), GPT-6 Astra and Gemini 4 Argon
+  (both through the pi command-line agent). Each gives value, sentence ids and an English
   translation of those sentences. All agree: accepted, ~20% spot-checked.
   Two agree: owner reviews from quote + translation. All differ: owner
   decides or the field is "uncertain" and not scored.
@@ -325,7 +325,7 @@ Newest at the bottom.
   whether jobfacts finds the same roles and filters them better (the
   Milestone 1 test). No jobfacts code moves into that tool.
 - **Rejected:** replacing job_watch's board polling now (loses the
-  comparison); copying jobfacts code into the vault; filtering German and
+  comparison); copying jobfacts code into that tool; filtering German and
   location inside jobfacts (only-watch rows would look like misses).
 
 ## 2026-11-03: Extraction rule fixes (wording plus three code rules)
@@ -460,3 +460,19 @@ Newest at the bottom.
 - **Rejected:** private use until the site answers an email (the owner preferred
   a clean rule over an exception); leaving it to the owner's private `job_watch`
   only is the owner's own choice outside this project.
+
+## 2026-11-05: Public repository now, notes private, CI pulled forward
+- **What:** the repository goes public on GitHub (`jobfacts`, AGPL-3.0) before
+  Milestone 1 is finished. The agent working files (`AGENTS.md`, `HANDOFF.md`,
+  `notes/`) move to a separate private repository and are removed from the
+  public history (history rewritten once before the first push; commit dates
+  kept, author email set to the GitHub no-reply address). A GitHub Actions
+  workflow runs ruff and the full test suite, database tests included, on every
+  push and pull request.
+- **Why:** the work should be visible while it happens, not only after a
+  write-up. The working files name private folders and files of the owner's
+  job search. CI is cheap now (one workflow file) and checks every change.
+- **Rejected:** staying private until Milestone 1 ends (the earlier plan);
+  publishing the history as it was (old versions of the working files would
+  stay readable); one squashed commit (loses the real history); adding the
+  accuracy gate to CI now (it needs the private labels; Milestone 2).
