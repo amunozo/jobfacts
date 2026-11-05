@@ -745,3 +745,45 @@ wd = "wd1"
 site = "datasite"
 
 # Swiss Life (swisslife / wd3 / Swiss_Life_Career_Site) left out: its robots.txt disallows the sitemap (checked 2026-11-02).
+
+[[employer]]
+name = "CircuitHub"
+ats = "ashby"
+board_id = "circuithub"
+
+[[employer]]
+name = "Destinus"
+ats = "workable"
+board_id = "destinusgroup"
+
+[[employer]]
+name = "Fuse Energy"
+ats = "workable"
+board_id = "fuseenergy"
+
+[[employer]]
+name = "KAYAK"
+ats = "ashby"
+board_id = "kayak"
+
+[[employer]]
+name = "Scalera"
+ats = "ashby"
+board_id = "scalera"
+
+[[employer]]
+name = "Microsoft"
+ats = "greenhouse"
+board_id = "microsoftcorporation"
+
+[[employer]]
+name = "Huawei Zurich Research Center"
+ats = "teamtailor"
+board_id = "huaweirc"
+url = "https://careers.huaweirc.ch/jobs.rss"
+
+[[employer]]
+name = "QoQa"
+ats = "teamtailor"
+board_id = "qoqa"
+url = "https://careers.qoqa.jobs/jobs.rss"
