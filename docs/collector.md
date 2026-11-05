@@ -38,7 +38,8 @@ throwaway schema `test_jobfacts` in the compose database and are skipped
 ## How postings are opened and closed
 
 - Each board is read in one go. Only if the whole read succeeds (including
-  every per-job detail request) are its results stored.
+  every per-job detail request) are its results stored, in one transaction that
+  is committed as soon as the board is stored (a crash keeps finished boards).
 - A posting in the response is inserted (new), or updated when its content
   hash (url, title, location, description) changed.
 - A stored open posting missing from a successful read gets `closed_at`.

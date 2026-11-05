@@ -445,3 +445,18 @@ Newest at the bottom.
 - **Rejected:** DeepSeek or Gemini as backup (a different model needs its own
   accuracy check, and search would mix models); switching only on quota errors
   (TypeSafe's quota signal is not documented: 402, 403 or 429).
+
+## 2026-11-05: SwissDevJobs rejected; only data a site openly allows
+- **What:** SwissDevJobs (swissdevjobs.ch) is not a source. It was built and run
+  once on 5 Nov, then removed with its data. Sources stay limited to official,
+  documented job-board APIs and feeds whose terms allow the use.
+- **Why:** SwissDevJobs has no official API; its website's own JSON
+  (`/api/jobsLight`) is undocumented. Its robots.txt allows bots to read it, but
+  robots.txt grants no right to reuse the data, and no terms of service were
+  found. If the project ever turned commercial, it would compete with the site's
+  business (paid job posts), which Swiss unfair-competition law (UWG Art. 5 lit. c,
+  taking over another's work by technical reproduction) makes risky. A private-only
+  exception would have to be removed again before publishing.
+- **Rejected:** private use until the site answers an email (the owner preferred
+  a clean rule over an exception); leaving it to the owner's private `job_watch`
+  only is the owner's own choice outside this project.

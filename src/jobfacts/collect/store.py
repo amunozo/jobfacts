@@ -112,6 +112,7 @@ def rekey_source_ids(conn: psycopg.Connection, employer_id: int, key) -> int:
                 conn.execute("UPDATE postings SET source_job_id = %s WHERE id = %s", (new, row_id))
                 taken.add(new)
                 changed += 1
+    conn.commit()  # the block above is only a savepoint if a SELECT opened a transaction
     return changed
 
 
@@ -211,4 +212,5 @@ def record_success(
             "VALUES (%s, %s, true, %s)",
             (run_id, employer_id, len(keep)),
         )
+    conn.commit()  # durable now, not at the end of the run (see rekey_source_ids)
     return counts

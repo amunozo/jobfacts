@@ -1,3 +1,4 @@
+import psycopg
 import pytest
 
 from jobfacts.collect import store
@@ -95,3 +96,56 @@ def test_empty_response_does_not_close_open_board(conn, tmp_path):
     s = collect(conn, fetchers={"fake": fake}, employers_file=path)
     assert (s.boards_ok, s.boards_failed, s.counts.closed) == (0, 1, 0)
     assert state(conn, "flaky-1") is False
+
+
+def second_connection(conn):
+    """A separate connection to the same test schema: sees only committed data."""
+    other = psycopg.connect(conn.info.dsn, password=conn.info.password)
+    other.execute("SET search_path TO test_jobfacts")
+    return other
+
+
+def test_collect_commits_each_board_before_a_crash(conn, tmp_path):
+    path = tmp_path / "e.toml"
+    path.write_text(
+        '[[employer]]\nname="A"\nats="fake"\nboard_id="a"\n'
+        '[[employer]]\nname="B"\nats="fake"\nboard_id="b"\n'
+    )
+
+    def fake(client, board_id, extra, known):
+        if board_id == "b":
+            raise KeyboardInterrupt
+        return [make("a-1"), make("a-2")]
+
+    fake.incremental = True  # known_versions() runs first and opens an implicit transaction
+
+    with pytest.raises(KeyboardInterrupt):
+        collect(conn, fetchers={"fake": fake}, employers_file=path)
+    with second_connection(conn) as other:
+        ids = other.execute("SELECT source_job_id FROM postings ORDER BY 1").fetchall()
+        reads = other.execute("SELECT count(*) FROM board_reads WHERE ok").fetchone()[0]
+    assert ids == [("a-1",), ("a-2",)]
+    assert reads == 1
+
+
+def test_failed_store_leaves_no_partial_board(conn, employer):
+    run = store.start_run(conn)
+    store.record_success(conn, run, employer, [make("keep")])
+    bad = Posting(None, "https://example.test/bad", "T", "Zurich", "Text")  # NULL job id
+    with pytest.raises(psycopg.errors.NotNullViolation):
+        store.record_success(conn, run, employer, [make("new"), bad])
+    conn.rollback()
+    with second_connection(conn) as other:
+        rows = other.execute("SELECT source_job_id, closed_at FROM postings").fetchall()
+        reads = other.execute("SELECT count(*) FROM board_reads").fetchone()[0]
+    assert rows == [("keep", None)]
+    assert reads == 1
+
+
+def test_rekey_is_committed(conn, employer):
+    read(conn, employer, [make("r-1-2")])
+    conn.execute("SELECT 1")  # an open implicit transaction, as in collect()
+    assert store.rekey_source_ids(conn, employer, lambda j: j.rsplit("-", 1)[0]) == 1
+    with second_connection(conn) as other:
+        ids = other.execute("SELECT source_job_id FROM postings").fetchall()
+    assert ids == [("r-1",)]
