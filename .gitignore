@@ -6,3 +6,8 @@ __pycache__/
 data/raw/
 data/private/
 STUDY_GUIDE.md
+
+# Private working files: symlinks into the private jobfacts-notes repository
+/AGENTS.md
+/HANDOFF.md
+/notes
