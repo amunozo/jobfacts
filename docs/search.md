@@ -211,7 +211,7 @@ stores the SHA-256 of its text (`text_hash`), the budget (`char_budget`) and the
 (it only refreshes the stored content hash if the posting changed after the cut), re-embeds
 one whose text changed, and re-embeds everything when run with another budget. Vectors are stored per (posting, model), so the
 models sit side by side; the `vector` column has no fixed dimension (1024, 1536, 1024).
-Queries are embedded when asked (one API call or one local forward pass). Qwen3-Embedding gets
+Queries are embedded when asked (one API call or one local forward pass); the web server remembers the last 1,024 query vectors (`docs/api.md`, "Query cache"). Qwen3-Embedding gets
 its instruction line (`Instruct: <job-search task>\nQuery: <q>`) on queries only.
 
 **Stale and missing vectors.** `search.stale_embedding_count(conn, model_id)` counts pool

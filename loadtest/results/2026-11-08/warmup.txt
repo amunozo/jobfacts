@@ -1,0 +1,23 @@
+  1.56 s  200  hybrid   software engineer python backend
+  0.88 s  200  hybrid   data analyst with sql and dashboards
+  0.48 s  200  hybrid   machine learning engineer for computer vision
+  1.29 s  200  hybrid   devops engineer kubernetes and cloud infrastructure
+  0.50 s  200  hybrid   frontend developer react typescript
+  0.46 s  200  hybrid   product manager for a software platform
+  0.45 s  200  hybrid   cybersecurity analyst
+  0.57 s  200  hybrid   data engineer building pipelines with spark
+  0.72 s  200  hybrid   mobile app developer ios android
+  0.86 s  200  hybrid   quality assurance and test automation engineer
+  0.61 s  200  hybrid   backend developer java microservices
+  0.61 s  200  hybrid   bioinformatics scientist
+  0.39 s  200  hybrid   project manager in the pharmaceutical industry
+  0.42 s  200  hybrid   robotics software engineer
+  0.76 s  200  hybrid   business intelligence consultant
+  0.42 s  200  hybrid   Softwareentwickler Cloud
+  0.46 s  200  hybrid   Datenanalyst Statistik
+  0.58 s  200  hybrid   ingénieur logiciel backend
+  0.44 s  200  hybrid   chef de projet informatique
+  0.41 s  200  hybrid   site reliability engineer
+200  /
+200  /health
+200  /api/search?canton=ZH

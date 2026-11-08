@@ -1,0 +1,11 @@
+date: 2026-11-08T15:37:49+01:00
+cpu: 13th Gen Intel(R) Core(TM) i7-1365U
+stack cpus: 4,5; locust cpus: 0-3
+/jobfacts-loadtest-app-1 cpuset=4,5 memory=268435456
+/jobfacts-loadtest-caddy-1 cpuset=4,5 memory=100663296
+/jobfacts-loadtest-db-1 cpuset=4,5 memory=402653184
+health: {"status":"ok","database":true,"open_postings":6058,"last_collection_finished":"2026-11-08T14:11:52.039001+00:00","last_daily_run":{"finished_at":"2026-11-08T14:11:52.776625+00:00","status":"ok"},"embedding_model":"mistral-embed"}
+fake-model|2515
+mistral-embed|2508
+Qwen/Qwen3-Embedding-0.6B|2504
+text-embedding-3-small|2504

@@ -12,7 +12,9 @@ See docs/search.md.
 import hashlib
 import os
 import sys
+import threading
 import time
+from collections import OrderedDict
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -247,6 +249,46 @@ class QwenEmbedder(Embedder):
     def embed_query(self, text: str) -> list[float]:
         model = self._load()
         return model.encode([self.query_text(text)], normalize_embeddings=True)[0].tolist()
+
+
+class QueryCache:
+    """A small in-process LRU cache of query vectors, so a repeated search does not call the
+    embedding API again (about 0.4 s with Mistral). The key is the model id plus the query text
+    with its whitespace normalised (case is kept: the model may treat it as meaning). Safe to
+    use from many threads. A failed call is not stored. Two threads that miss on the same new
+    query at the same moment both call the API (rare, and harmless: same answer twice)."""
+
+    def __init__(self, max_entries: int = 1024):
+        self.max_entries = max_entries
+        self._items: OrderedDict[tuple[str, str], list[float]] = OrderedDict()
+        self._lock = threading.Lock()
+        self.hits = 0
+        self.misses = 0
+
+    @staticmethod
+    def normalize(text: str) -> str:
+        return " ".join(text.split())
+
+    def get_or_embed(self, model: str, text: str, embed: Callable[[], list[float]]) -> list[float]:
+        key = (model, self.normalize(text))
+        with self._lock:
+            vector = self._items.get(key)
+            if vector is not None:
+                self._items.move_to_end(key)
+                self.hits += 1
+                return list(vector)
+            self.misses += 1
+        vector = embed()  # outside the lock: the API call must not block other searches
+        with self._lock:
+            self._items[key] = list(vector)
+            self._items.move_to_end(key)
+            while len(self._items) > self.max_entries:
+                self._items.popitem(last=False)
+        return vector
+
+    def __len__(self) -> int:
+        with self._lock:
+            return len(self._items)
 
 
 FACTORIES = {"mistral": mistral_embedder, "openai": openai_embedder, "qwen": QwenEmbedder}

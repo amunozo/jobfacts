@@ -70,6 +70,14 @@ the first thing to check, and today that means reading every posting.
   any of 10 fields loses more than 2 points against `ci/accuracy_baseline.json`.
   It measures changes to the code rules on fixed answers, not model drift, and
   skips when the key is not set (forks). See `docs/gate.md`.
+- **Load test (Milestone 2).** A Locust test (`loadtest/`, `docs/loadtest.md`)
+  runs the production Docker stack on a laptop, limited to 2 CPU threads and
+  the compose memory limits, through Caddy over HTTPS, on the real data (about
+  2,500 embedded postings; query embeddings cached): p95 310 ms at 25 simulated
+  users with 0% errors; at 50 users p95 about 1.0 s (also 0% errors), the
+  database CPU is the limit. Measured on a laptop, not on a real server, with
+  60-second steps and simulated users; see the limits in the document. The web
+  server keeps the last 1,024 query embeddings in memory.
 - **Evaluation.** A local labelling web app, reference labels, and an
   accuracy report per field and per posting language (`docs/labelling.md`).
 - **Search recall check.** `jobfacts search-eval` replays past job
@@ -133,7 +141,7 @@ longer texts.
   one AWS Lightsail server with Docker Compose exist (`docs/deploy.md`) and
   were tested locally, but nothing is deployed, so there is no scheduled daily
   run on a server and no outside alert configured yet.
-- A load test (Milestone 2).
+- A load test against the real server (the one above ran on a laptop).
 - PhD and stated-salary fields, salary estimates (Milestone 3).
 - Commute time and relisted roles (Milestone 4).
 
@@ -200,6 +208,8 @@ Each design decision, with the alternatives rejected, is in
    same role.
 
 **Later (not planned yet):**
+- A cheaper search query: on the load test the database CPU is the limit, and
+  most of a search is the SQL that lists the filtered postings (`docs/loadtest.md`).
 - More feed types, each only after a terms check: SAP SuccessFactors (many
   large Swiss employers: insurers, industry, EPFL), JOIN, prospective.ch JSON
   (Swiss federal administration, several universities), Oracle Recruiting

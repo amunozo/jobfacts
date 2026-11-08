@@ -33,6 +33,7 @@ packages = ["src/jobfacts"]
 [dependency-groups]
 dev = [
     "cryptography>=50.0.2",
+    "locust>=2.47.0",
     "pytest>=8",
     "ruff>=0.6",
 ]

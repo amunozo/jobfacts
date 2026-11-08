@@ -113,6 +113,12 @@ duration, status, failed step, the numbers of the run's summary and the cost. Se
   (1 to 4, `psycopg_pool.ConnectionPool`) and lends them to requests. A request waits at most
   5 seconds for a free one. The query embedding is made before a connection is borrowed, so a
   slow embedding API does not use up the pool.
+- **Query cache:** embedding a query is one call to the Mistral API (about 0.4 s). The server
+  keeps the vectors of the last 1,024 distinct queries in memory (`embed.QueryCache`, a
+  least-recently-used cache: when it is full the query not used for the longest time is dropped),
+  keyed by the model and the query text with its whitespace normalised (upper and lower case
+  stay different). A repeated query skips the API call. The cache is lost when the server
+  restarts, and the command line does not use it.
 - **Content-Security-Policy (CSP):** a response header that tells the browser which sources
   a page may load. Ours allows only the server itself: no CDN, no web fonts, no scripts from
   elsewhere. With `X-Content-Type-Options: nosniff` the browser does not guess content types.

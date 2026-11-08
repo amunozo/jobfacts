@@ -354,3 +354,59 @@ def test_timeouts_and_connection_errors_are_retried():
     with pytest.raises(openai.APITimeoutError):
         emb.embed_query("dddd")
     assert len(waits) == embed.QUERY_ATTEMPTS - 1
+
+
+# ---------- the query cache ----------
+
+
+def test_query_cache_calls_the_embedder_once_per_distinct_query():
+    cache, calls = embed.QueryCache(), []
+
+    def make(text):
+        return lambda: calls.append(text) or [float(len(text))]
+
+    assert cache.get_or_embed("m", "data job", make("data job")) == [8.0]
+    assert cache.get_or_embed("m", "  data   job ", make("again")) == [8.0]  # same, whitespace
+    assert calls == ["data job"] and (cache.hits, cache.misses) == (1, 1)
+    cache.get_or_embed("m", "other job", make("other job"))  # a different query
+    cache.get_or_embed("m2", "data job", make("data job m2"))  # the same text, another model
+    cache.get_or_embed("m", "Data job", make("Data job"))  # case is part of the key
+    assert calls == ["data job", "other job", "data job m2", "Data job"]
+
+
+def test_query_cache_returns_copies_and_does_not_store_failures():
+    cache = embed.QueryCache()
+    first = cache.get_or_embed("m", "q", lambda: [1.0, 2.0])
+    first.append(99.0)  # a caller changing its list must not change the cache
+    assert cache.get_or_embed("m", "q", lambda: [0.0]) == [1.0, 2.0]
+
+    def boom():
+        raise RuntimeError("api down")
+
+    with pytest.raises(RuntimeError):
+        cache.get_or_embed("m", "new", boom)
+    assert cache.get_or_embed("m", "new", lambda: [3.0]) == [3.0]
+
+
+def test_query_cache_drops_the_least_recently_used_entry():
+    cache = embed.QueryCache(max_entries=2)
+    for q in ["a", "b"]:
+        cache.get_or_embed("m", q, lambda q=q: [q])
+    cache.get_or_embed("m", "a", lambda: ["unused"])  # "a" is now the newest
+    cache.get_or_embed("m", "c", lambda: ["c"])  # evicts "b"
+    assert len(cache) == 2
+    assert cache.get_or_embed("m", "a", lambda: ["new"]) == ["a"]
+    assert cache.get_or_embed("m", "b", lambda: ["new b"]) == ["new b"]
+
+
+def test_query_cache_is_safe_with_many_threads():
+    from concurrent.futures import ThreadPoolExecutor
+
+    cache = embed.QueryCache(max_entries=8)
+    with ThreadPoolExecutor(16) as pool:
+        results = list(
+            pool.map(
+                lambda i: cache.get_or_embed("m", f"q{i % 20}", lambda i=i: [i % 20]), range(400)
+            )
+        )
+    assert results == [[i % 20] for i in range(400)] and len(cache) <= 8

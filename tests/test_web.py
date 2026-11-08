@@ -240,6 +240,18 @@ def test_api_default_is_hybrid_and_the_query_is_embedded_once(conn, seed):
 
 
 @pytest.mark.db
+def test_a_repeated_query_is_embedded_once_a_different_one_again(conn, seed):
+    near = seed.add(title="near", desc="horses")
+    vectors(conn, {near: [1.0, 0.0, 0.0]}, model="mistral-embed")
+    fake = QueryEmbedder()
+    client = make_client(conn, fake)
+    for query in ["unicorn wrangler", "unicorn  wrangler ", "unicorn wrangler", "horse trainer"]:
+        r = client.get("/api/search", params={"query": query}, headers=basic())
+        assert r.status_code == 200 and r.json()["mode_used"] == "hybrid"
+    assert fake.queries == ["unicorn wrangler", "horse trainer"]
+
+
+@pytest.mark.db
 def test_api_falls_back_to_words_with_a_warning_that_hides_the_error(conn, seed):
     seed.add(title="words", desc="unicorn wrangler")
     seed.add(title="other", desc="horses")

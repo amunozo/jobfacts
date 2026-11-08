@@ -437,6 +437,7 @@ def prepare(
     alias: str = embed.DEFAULT_MODEL,
     embedder_factory: Callable[[str], embed.Embedder] | None = None,
     error_detail: bool = True,
+    query_cache: embed.QueryCache | None = None,
 ) -> Plan:
     """Validate the filters, pick the mode and embed the query. No database access, so a web
     server does not hold a connection while it waits for the embedding API.
@@ -445,7 +446,8 @@ def prepare(
     filter list) or when the query cannot be embedded (a warning says so). An explicit `meaning`
     or `hybrid` without a query raises `SearchError`; an explicit `meaning` that cannot be
     embedded raises `EmbedError`. `error_detail=False` leaves the exception text out of the
-    warning (a web page must not show internals).
+    warning (a web page must not show internals). `query_cache` (the web server passes one)
+    keeps the vectors of queries already embedded.
     """
     try:
         model = embed.model_id(alias)
@@ -466,7 +468,12 @@ def prepare(
         return plan
     try:
         make = embedder_factory or embed.make_embedder  # looked up now: tests replace it
-        plan.vector = make(alias).embed_query(f.query)
+        if query_cache is None:
+            plan.vector = make(alias).embed_query(f.query)
+        else:
+            plan.vector = query_cache.get_or_embed(
+                model, f.query, lambda: make(alias).embed_query(f.query)
+            )
     except Exception as error:  # no API key, missing optional group, network or API error
         if mode == "meaning":
             detail = f": {error!r}" if error_detail else ""
@@ -514,8 +521,9 @@ def run(
     embedder_factory: Callable[[str], embed.Embedder] | None = None,
     evidence: bool = False,
     error_detail: bool = True,
+    query_cache: embed.QueryCache | None = None,
 ) -> RunResult:
     """The whole search as the command line and the web API run it: `prepare` then `execute`.
     `f.mode` and `f.model` are ignored; `mode` and `alias` decide."""
-    plan = prepare(f, mode, alias, embedder_factory, error_detail)
+    plan = prepare(f, mode, alias, embedder_factory, error_detail, query_cache)
     return execute(conn, f, plan, evidence)

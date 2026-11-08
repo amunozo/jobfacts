@@ -1,0 +1,16 @@
+# Added on top of deploy/compose.prod.yml for the load test only (loadtest/run.sh); the
+# production file is not changed. It makes the whole stack share two CPU threads, like the
+# 2 vCPUs of the Lightsail 1 GB plan. `cpus: 2.0` on each service would allow each container
+# 2 CPUs (6 in all); `cpuset` pins all of them to the same two threads, so together they get 2.
+# The threads (LOADTEST_STACK_CPUS) are chosen by run.sh; the memory limits stay as they are in
+# deploy/compose.prod.yml.
+services:
+  db:
+    cpuset: "${LOADTEST_STACK_CPUS:?set by loadtest/run.sh}"
+  app:
+    cpuset: "${LOADTEST_STACK_CPUS:?set by loadtest/run.sh}"
+    image: jobfacts-loadtest:latest # not the name of the real image
+  caddy:
+    cpuset: "${LOADTEST_STACK_CPUS:?set by loadtest/run.sh}"
+  caddy-init:
+    cpuset: "${LOADTEST_STACK_CPUS:?set by loadtest/run.sh}"

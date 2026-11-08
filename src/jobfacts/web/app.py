@@ -192,6 +192,7 @@ def create_app(
         )
         connection_source = pool.connection
     embedders = CachedEmbedders(embedder_factory or embed.make_embedder)
+    query_cache = embed.QueryCache()  # repeated queries skip the embedding API call
     env = make_environment()
     model_id = embed.model_id(model)
 
@@ -275,7 +276,14 @@ def create_app(
     def run_search(request: Request, evidence: bool):
         """Parse, embed (no connection held), then search. Returns (parsed, result)."""
         parsed = params.parse(request.query_params.multi_items())
-        plan = search.prepare(parsed.filters, parsed.mode, model, embedders, error_detail=False)
+        plan = search.prepare(
+            parsed.filters,
+            parsed.mode,
+            model,
+            embedders,
+            error_detail=False,
+            query_cache=query_cache,
+        )
         with connection_source() as conn:
             result = search.execute(conn, parsed.filters, plan, evidence or parsed.evidence)
         return parsed, result
