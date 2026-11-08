@@ -1,6 +1,7 @@
 """Command line: `jobfacts migrate` and `jobfacts collect`."""
 
 import argparse
+import json
 import sys
 from datetime import date
 from pathlib import Path
@@ -86,6 +87,75 @@ def _serve(args) -> int:
         create_app(password=password, auth=not args.no_auth), host=args.host, port=args.port
     )
     return 0
+
+
+def _gate(args) -> int:
+    """`jobfacts gate keygen|record|encrypt|check` (no database; see docs/gate.md)."""
+    from jobfacts import gate, reference
+    from jobfacts.testset import PRIVATE_DIR, load_test_set
+
+    try:
+        if args.action == "keygen":
+            path = gate.write_key(force=args.force)
+            print(f"new key written to {path} (mode 600, not shown)")
+            return 0
+        if args.action in ("record", "encrypt"):
+            key = gate.key_for_writing()
+            if args.action == "encrypt":
+                bundle = json.loads(gate.PLAIN_BUNDLE_PATH.read_text(encoding="utf-8"))
+            else:
+                from jobfacts.extract.jev import make_client
+
+                data_dir = args.data_dir or PRIVATE_DIR
+                items = load_test_set(data_dir / "holdout_set.jsonl")
+                bundle = gate.record(
+                    items, reference.load_reference(data_dir, "holdout"), make_client()
+                )
+            gate.write_bundle(bundle, key)
+            meta = bundle["meta"]
+            print(
+                f"{args.action}: {meta['n']} postings, model {meta['model']}, "
+                f"${meta.get('cost_usd', 0):.4f}\nplain: {gate.PLAIN_BUNDLE_PATH}\n"
+                f"encrypted: {gate.BUNDLE_PATH} ({gate.BUNDLE_PATH.stat().st_size:,} bytes)"
+            )
+            return 0
+        key = gate.load_key()
+        if key is None:
+            if args.skip_without_key:
+                print(f"gate skipped: {gate.KEY_ENV} is not set (a fork or a local run).")
+                return 0
+            print(f"{gate.KEY_ENV} is not set; pass --skip-without-key to skip the gate.")
+            return 2
+        bundle = gate.load_bundle(key)
+        gate.check_spec(bundle)
+        scored = gate.replay(bundle)
+        if args.write_baseline:
+            doc = gate.baseline_document(bundle["meta"], scored["fields"])
+            gate.write_baseline(doc)
+            print(f"wrote {gate.BASELINE_PATH}")
+            baseline = doc["fields"]
+        else:
+            baseline = gate.load_baseline()["fields"]
+        rows = gate.compare(baseline, scored["fields"])
+        print(gate.render_table(rows))
+        ns = {f: v["n"] for f, v in scored["fields"].items()}
+        print(f"\nn per field: {ns}")
+        moved = {f: c for f, c in scored["changed"].items() if c}
+        print(f"answers that differ from the recording (count only): {moved or 'none'}")
+        if scored["split_changed"]:
+            print(
+                f"warning: today's sentence splitter cuts {scored['split_changed']} postings "
+                "differently from the recording; the gate uses the recorded sentences."
+            )
+        failed = [r[0] for r in rows if not r[4]]
+        if failed:
+            print(f"\nGATE FAILED: {', '.join(failed)}")
+            return 1
+        print("\ngate passed")
+        return 0
+    except (gate.GateError, FileNotFoundError) as error:
+        print(error)
+        return 2
 
 
 def _reference(args, data_dir) -> int:
@@ -331,8 +401,24 @@ def main(argv: list[str] | None = None) -> int:
     sil.add_argument("--limit", type=int)
     sil.add_argument("--posting", type=int, help="only this posting id")
     sil.add_argument("--force", action="store_true", help="relabel postings that have an answer")
+    gat = sub.add_parser(
+        "gate", help="accuracy gate for CI: record model answers, replay them through the rules"
+    )
+    gat.add_argument("action", choices=["keygen", "record", "encrypt", "check"])
+    gat.add_argument("--force", action="store_true", help="keygen: replace an existing key")
+    gat.add_argument("--data-dir", type=Path, help="record: folder with the held-out set")
+    gat.add_argument(
+        "--skip-without-key",
+        action="store_true",
+        help="check: exit 0 with a notice when JOBFACTS_GATE_KEY is not set (forks)",
+    )
+    gat.add_argument(
+        "--write-baseline", action="store_true", help="check: write ci/accuracy_baseline.json"
+    )
     args = parser.parse_args(argv)
 
+    if args.command == "gate":
+        return _gate(args)
     if args.command == "silver":
         return _silver(args)
     if args.command == "serve":

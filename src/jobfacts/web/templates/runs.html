@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}jobfacts: daily runs{% endblock %}
+{% block content %}
+<h1 class="page-title">Daily runs</h1>
+{% if not runs %}
+<p class="empty">No daily run recorded yet.</p>
+{% else %}
+<p class="summary">The last {{ runs|length }} runs of <code>jobfacts daily</code>, newest first. Times are Europe/Zurich.</p>
+<div class="table-scroll">
+<table class="runs">
+  <thead>
+    <tr>
+      <th>Started</th><th>Duration</th><th>Status</th><th>Failed step</th>
+      <th class="num">Boards ok</th><th class="num">Boards failed</th>
+      <th class="num">New</th><th class="num">Closed</th><th class="num">Scored relevant</th>
+      <th class="num">Extracted</th><th class="num">Embedded</th><th class="num">Errors</th>
+      <th class="num">Cost (USD)</th><th>Warnings</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for r in runs %}
+    <tr>
+      <td>{{ r.started }}</td>
+      <td>{{ r.duration }}</td>
+      <td><span class="status {{ r.status_class }}">{{ r.status }}</span></td>
+      <td>{{ r.failed_step or "" }}</td>
+      <td class="num">{{ r.boards_ok if r.boards_ok is not none else "" }}</td>
+      <td class="num">{{ r.boards_failed if r.boards_failed is not none else "" }}</td>
+      <td class="num">{{ r.new_postings if r.new_postings is not none else "" }}</td>
+      <td class="num">{{ r.closed if r.closed is not none else "" }}</td>
+      <td class="num">{{ r.relevant if r.relevant is not none else "" }}</td>
+      <td class="num">{{ r.extracted if r.extracted is not none else "" }}</td>
+      <td class="num">{{ r.embedded if r.embedded is not none else "" }}</td>
+      <td class="num">{{ r.errors if r.errors is not none else "" }}</td>
+      <td class="num">{{ r.cost }}</td>
+      <td>{{ r.warnings or "" }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endif %}
+{% endblock %}

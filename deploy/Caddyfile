@@ -1,0 +1,22 @@
+# Caddy: HTTPS in front of the app. For a real name, Caddy gets and renews a free certificate
+# from Let's Encrypt by itself (ports 80 and 443 must be open). For `localhost` it makes a
+# certificate with its own test authority (use `curl -k`).
+{
+	# No HTTP/3: it needs UDP port 443, which neither compose nor the firewall opens.
+	servers {
+		protocols h1 h2
+	}
+}
+
+{$JOBFACTS_DOMAIN} {
+	encode zstd gzip
+
+	# The app already sets Content-Security-Policy, X-Content-Type-Options, Referrer-Policy and
+	# Cache-Control. It cannot know it is behind HTTPS, so the HTTPS-only header is added here.
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		-Server
+	}
+
+	reverse_proxy app:8000
+}

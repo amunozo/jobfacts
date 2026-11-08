@@ -1,8 +1,15 @@
 import pytest
 
-from jobfacts import cli, daily
+from jobfacts import cli, daily, monitor
 
 REAL_EMBED_STEP = daily._embed
+
+
+@pytest.fixture(autouse=True)
+def no_run_table(monkeypatch):
+    """These tests use a fake connection; recording runs is tested in test_monitor.py."""
+    monkeypatch.setattr(monitor, "start_run", lambda conn: 1)
+    monkeypatch.setattr(monitor, "finish_run", lambda *a, **k: None)
 
 
 class Done:
@@ -104,6 +111,28 @@ def test_database_never_comes_up(tmp_path):
         daily.ensure_database(lambda: False, lambda *a, **k: Done(), lambda s: None, tmp_path, 6)
 
 
+def test_no_db_start_waits_without_docker(monkeypatch):
+    monkeypatch.setenv("JOBFACTS_NO_DB_START", "1")
+    answers = iter([False, False, True])
+    ran, slept = [], []
+    started = daily.ensure_database(
+        lambda: next(answers), lambda *a, **k: ran.append(a), slept.append
+    )
+    assert started is False
+    assert ran == []
+    assert len(slept) == 2
+
+
+def test_no_db_start_gives_up_without_docker(monkeypatch):
+    monkeypatch.setenv("JOBFACTS_NO_DB_START", "1")
+    ran = []
+    with pytest.raises(daily.StepFailed, match="not reachable"):
+        daily.ensure_database(
+            lambda: False, lambda *a, **k: ran.append(a), lambda s: None, timeout=6
+        )
+    assert ran == []
+
+
 def test_docker_failure_names_database_step(tmp_path):
     bad = type("Bad", (), {"returncode": 1})()
     with pytest.raises(daily.StepFailed) as e:
@@ -135,7 +164,12 @@ def test_embed_step_warns_and_continues_without_a_key(monkeypatch, capsys):
     daily._embed(conn, totals)
     out = capsys.readouterr().out
     assert "warning: embedding skipped (KeyError: 'MISTRAL_API_KEY')" in out
-    assert totals == {"cost": 0.004, "embedded": 0} and conn.rolled_back == 1
+    assert totals == {
+        "cost": 0.004,
+        "embedded": 0,
+        "warnings": ["embedding skipped (KeyError)"],
+    }
+    assert conn.rolled_back == 1
 
 
 def test_embed_step_warns_and_continues_when_the_api_fails(monkeypatch, capsys):

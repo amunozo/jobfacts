@@ -1,0 +1,23 @@
+[Unit]
+Description=jobfacts daily run (collect, relevance, extraction, embeddings)
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# setup.sh replaces /home/ubuntu/jobfacts and ubuntu if the repository lives elsewhere.
+User=ubuntu
+WorkingDirectory=/home/ubuntu/jobfacts
+# Runs the job in a throwaway container of the app image. -T: no terminal (there is none).
+# The fixed name lets ExecStopPost stop the container: stopping the unit (or the start timeout)
+# only ends the `docker compose run` client, and the container would run on. ExecStopPost runs
+# in every case, also after a timeout. `-` before a command ignores its errors. The first line
+# removes a leftover of a killed run.
+ExecStartPre=-/usr/bin/docker rm -f jobfacts-daily-run
+ExecStart=/home/ubuntu/jobfacts/deploy/dc run --rm -T --name jobfacts-daily-run daily
+# SIGTERM makes `jobfacts daily` record the run as failed and ping /fail; 30 s is its time to do so.
+ExecStopPost=-/usr/bin/docker stop -t 30 jobfacts-daily-run
+ExecStopPost=-/usr/bin/docker rm -f jobfacts-daily-run
+TimeoutStartSec=4h
+TimeoutStopSec=60

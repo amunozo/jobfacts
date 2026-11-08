@@ -613,3 +613,76 @@ Newest at the bottom.
   internals; the full error goes to the server log instead).
 - **Open:** Basic authentication is clear text without TLS, so a deployment beyond localhost
   needs HTTPS in front; there is no limit on password guesses.
+
+## 2026-11-08: Deployment on one AWS Lightsail instance with Docker Compose
+- **What:** one Lightsail Ubuntu 24.04 instance in Frankfurt (Lightsail has no
+  Zurich region), IPv4 plan with 1 GB RAM (7 USD/month on the official pricing
+  page, 8 Nov 2026) plus a 2 GB swap file. Docker Compose runs PostgreSQL with
+  pgvector (no published port), the app, and Caddy, a reverse proxy (a server
+  that receives the public HTTPS traffic and passes it to the app) that gets
+  TLS certificates from Let's Encrypt by itself. Without a domain the name is
+  `<ip-with-dashes>.sslip.io`, a free DNS service that maps the name to the IP.
+  A systemd timer runs `jobfacts daily` at 06:30 Swiss time as a separate
+  compose service, with `JOBFACTS_NO_DB_START=1` so it never tries to start
+  Docker from inside a container; a second timer writes a nightly `pg_dump`
+  and keeps 7. `push-db.sh` moves the local database to the server once;
+  afterwards only the server collects. `/health` is public on purpose (for an
+  outside uptime check); the rest stays behind HTTP Basic over HTTPS.
+- **Why:** the owner set a maximum of 10 EUR a month and wanted a provider
+  that is recognisable on a CV. Lightsail is AWS, bundles disk, transfer and
+  the IPv4 address in one fixed price, and fits the budget; the whole system
+  needs about 230 MB of memory at idle (measured locally), so 1 GB with swap
+  is enough. One machine with Compose is the same setup as development, which
+  keeps it simple to explain and to debug.
+- **Rejected:** EC2 with separate disk and IPv4 charges (more parts, about
+  the same cost or more); a managed database such as RDS or Cloud SQL (alone
+  above the budget); Google Cloud's free e2-micro (US regions only); Hetzner
+  (cheapest per GB of RAM but less known on a CV); the IPv6-only Lightsail
+  plan (sslip.io and many clients still need IPv4); Kubernetes (far too much
+  for one service).
+
+## 2026-11-08: Light monitoring: a health endpoint, a dead-man ping, a table of runs
+
+- **Decided:** three small pieces. `/health` stays public and cheap, and an outside uptime
+  monitor watches it. `jobfacts daily` pings an outside dead-man service
+  (healthchecks.io-style URL in `JOBFACTS_HEALTHCHECK_URL`): `/start` at the beginning, the
+  summary on success, `/fail` with the step name on failure. Every run is a row in the table
+  `daily_runs` (started, finished, status, failed step, the numbers of the summary, cost,
+  warnings), shown at `/runs` behind the password. A ping that fails only prints a warning;
+  with no variable nothing is sent.
+- **Why:** the owner wants to learn about a broken daily run without opening the server, and a
+  run that never starts leaves no trace on the server itself, so the alert has to come from
+  outside. The table answers "what did the last runs do and what did they cost" without
+  reading logs. `/health` keeps its status code independent of the daily run on purpose: the
+  uptime monitor answers "is the server up", the dead-man switch answers "did the job run".
+- **Rejected:** Prometheus and Grafana (two more services for one 1 GB machine, and an
+  alerting setup to maintain); a systemd `OnFailure=` e-mail (needs a mail setup on the
+  server, and says nothing when the machine or the timer is down); alerting from inside the
+  daily run only (a run that never starts sends nothing); a paid monitoring product (against
+  the 10 EUR budget); failing `/health` when the last run failed (an uptime alert about the
+  job would hide whether the server itself is up).
+
+## 2026-11-08: Accuracy gate in CI from encrypted labels and recorded answers
+
+- **Decided:** the held-out labels and Jev's raw answers for the 50 held-out postings
+  are stored encrypted (Fernet) in `ci/holdout_bundle.enc`; the key is the GitHub
+  secret `JOBFACTS_GATE_KEY`. A CI step (`jobfacts gate check`) decrypts the bundle,
+  re-applies the current code rules to the recorded answers (no model call), scores
+  each field with the held-out report's own functions and fails if any field is more
+  than 2 points below `ci/accuracy_baseline.json` (numbers only). The bundle holds
+  the question hash and the check refuses a bundle recorded for other questions;
+  `EXTRACTION_CODE_VERSION` is outside that hash because it is what the gate tests.
+  `relevant` is not covered (separate relevance call).
+- **Why:** the project's value is the accuracy figures, and the code rules are what
+  changes most often; a rule edit that fixes one posting can break three others
+  without any unit test noticing. Fixed answers make the check free, quick (seconds)
+  and deterministic, which a gate needs: Jev gave different answers on 3 of 450
+  answers in identical runs, so a live run could fail with no code change.
+- **Limits:** it does not see model drift, only code-rule changes; on 50 postings one
+  posting is 2 points, so the 2-point threshold allows one changed posting.
+- **Rejected:** plain labels in the repository (the repository is public and the
+  postings and labels are private by rule); calling the model in CI (costs money on
+  every push, needs the API keys as secrets in a public repository's workflow, and
+  is not deterministic, so the gate would fail at random); a private self-hosted
+  runner holding the data (a machine to keep running and secure for one check, and it
+  is not reproducible by anyone reading the repository).

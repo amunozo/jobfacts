@@ -1,4 +1,5 @@
-"""The web app: `GET /health`, `GET /api/search` (JSON) and `GET /` (the search page).
+"""The web app: `GET /health`, `GET /api/search` (JSON), `GET /` (the search page) and
+`GET /runs` (the table of daily runs).
 
 `create_app` takes the database connection source and the embedder as arguments, so tests
 use a throwaway schema and a fake embedder. HTTP Basic protects everything except /health.
@@ -13,13 +14,16 @@ from collections.abc import Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import urlencode, urlsplit
+from zoneinfo import ZoneInfo
 
 import psycopg
+import psycopg.rows
 import psycopg_pool
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from jinja2 import Environment, FileSystemLoader
+from psycopg import errors as pg_errors
 
 from jobfacts import db, embed, locations, search
 from jobfacts.extract.spec import SENIORITY_VALUES
@@ -48,6 +52,8 @@ LEVELS = [
     ("fluent", "up to fluent"),
 ]
 WORK_MODE_CHOICES = search.WORK_MODES
+RUNS_SHOWN = 30
+ZURICH = ZoneInfo("Europe/Zurich")
 SENIORITY_CHOICES = [v for v in SENIORITY_VALUES if v != "not_stated"]
 
 ConnectionSource = Callable[[], contextlib.AbstractContextManager[psycopg.Connection]]
@@ -74,6 +80,41 @@ def make_environment() -> Environment:
     env.filters["safe_url"] = safe_url
     env.filters["human"] = human
     return env
+
+
+def duration_text(started, finished) -> str:
+    if finished is None:
+        return ""
+    seconds = max(int((finished - started).total_seconds()), 0)
+    minutes, seconds = divmod(seconds, 60)
+    hours, minutes = divmod(minutes, 60)
+    if hours:
+        return f"{hours} h {minutes:02d} min"
+    return f"{minutes} min {seconds:02d} s" if minutes else f"{seconds} s"
+
+
+def run_rows(rows) -> list[dict]:
+    """Template-ready values for the `daily_runs` rows (newest first)."""
+    return [
+        {
+            "started": r["started_at"].astimezone(ZURICH).strftime("%Y-%m-%d %H:%M"),
+            "duration": duration_text(r["started_at"], r["finished_at"]),
+            "status": r["status"],
+            "status_class": r["status"] if r["status"] in ("failed", "running") else "",
+            "failed_step": r["failed_step"],
+            "boards_ok": r["boards_ok"],
+            "boards_failed": r["boards_failed"],
+            "new_postings": r["new_postings"],
+            "closed": r["closed"],
+            "relevant": r["relevant"],
+            "extracted": r["extracted"],
+            "embedded": r["embedded"],
+            "errors": r["errors"],
+            "cost": "" if r["cost_usd"] is None else f"{r['cost_usd']:.3f}",
+            "warnings": r["warnings"],
+        }
+        for r in rows
+    ]
 
 
 class CachedEmbedders:
@@ -192,6 +233,21 @@ def create_app(
         log.error("database unavailable: %r", error)
         return JSONResponse({"error": "database unavailable"}, status_code=503)
 
+    def last_daily_run_status(conn) -> dict | None:
+        """finished_at and status of the newest daily run; None if none (or no table yet:
+        a server upgraded before the first `jobfacts daily` must still answer 200)."""
+        try:
+            with conn.transaction():
+                row = conn.execute(
+                    "SELECT finished_at, status FROM daily_runs ORDER BY started_at DESC LIMIT 1"
+                ).fetchone()
+        except pg_errors.UndefinedTable:
+            return None
+        if row is None:
+            return None
+        finished, status = row
+        return {"finished_at": finished.isoformat() if finished else None, "status": status}
+
     @app.get("/health")
     def health():
         try:
@@ -200,6 +256,7 @@ def create_app(
                     "SELECT (SELECT count(*) FROM postings WHERE closed_at IS NULL "
                     "AND origin = 'board'), (SELECT max(finished_at) FROM collection_runs)"
                 ).fetchone()
+                last_daily_run = last_daily_run_status(conn)
         except Exception as error:  # any failure to reach or read the database
             log.error("health check failed: %r", error)
             return JSONResponse(
@@ -211,6 +268,7 @@ def create_app(
             "database": True,
             "open_postings": open_postings,
             "last_collection_finished": last_run.isoformat() if last_run else None,
+            "last_daily_run": last_daily_run,
             "embedding_model": model_id,
         }
 
@@ -266,6 +324,22 @@ def create_app(
             context["error"] = str(error)
         html = env.get_template("index.html").render(**context)
         return HTMLResponse(html, status_code=status)
+
+    @app.get("/runs", response_class=HTMLResponse)
+    def runs():
+        try:
+            with (
+                connection_source() as conn,
+                conn.transaction(),
+                conn.cursor(row_factory=psycopg.rows.dict_row) as cur,
+            ):
+                cur.execute(
+                    "SELECT * FROM daily_runs ORDER BY started_at DESC LIMIT %s", (RUNS_SHOWN,)
+                )
+                rows = cur.fetchall()
+        except pg_errors.UndefinedTable:  # not migrated yet: same as no run recorded
+            rows = []
+        return HTMLResponse(env.get_template("runs.html").render(runs=run_rows(rows)))
 
     @app.get("/favicon.ico")
     def favicon():

@@ -1,0 +1,24 @@
+# Keep out of the image: data, secrets, private notes, history, caches.
+.git
+.github
+.env
+.env.*
+!.env.example
+data/
+notes
+notes/
+HANDOFF.md
+AGENTS.md
+STUDY_GUIDE.md
+.venv
+**/__pycache__
+*.pyc
+.pytest_cache
+.ruff_cache
+backups/
+tests/
+docs/
+scripts/
+deploy/
+prompts/
+README.md

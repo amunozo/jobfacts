@@ -35,6 +35,7 @@ An **endpoint** is one URL the server answers, with the kind of answer it gives.
 | `GET /health` | none | JSON, 200 or 503 |
 | `GET /api/search` | password | JSON |
 | `GET /` | password | HTML page (no JavaScript) |
+| `GET /runs` | password | HTML page: the last 30 daily runs |
 | `GET /static/style.css` | password | the stylesheet |
 
 ### `GET /health`
@@ -43,10 +44,15 @@ Meant for a monitor or a load balancer. Nothing sensitive:
 
 ```json
 {"status": "ok", "database": true, "open_postings": 123,
- "last_collection_finished": "2026-11-08T08:40:37+00:00", "embedding_model": "mistral-embed"}
+ "last_collection_finished": "2026-11-08T08:40:37+00:00",
+ "last_daily_run": {"finished_at": "2026-11-08T08:41:02+00:00", "status": "ok"},
+ "embedding_model": "mistral-embed"}
 ```
 
-`last_collection_finished` is `null` before the first finished collection run. If the database
+`last_collection_finished` is `null` before the first finished collection run.
+`last_daily_run` is the newest row of the `daily_runs` table (`finished_at` is `null` while it
+is `running`), or `null` if there is none. It does not change the status code: a failed daily
+run is reported by the dead-man ping (see `docs/monitoring.md`), not by `/health`. If the database
 cannot be reached the answer is status 503 with `{"status": "unavailable", "database": false,
 "embedding_model": ...}` and no error text.
 
@@ -91,6 +97,12 @@ element). It shows the mode used and every warning. The form is a plain HTML for
 a `GET` request, so the page works without JavaScript and every search has a URL that can be
 bookmarked.
 
+### `GET /runs`
+
+The table of the last 30 runs of `jobfacts daily`, newest first: start time (Europe/Zurich),
+duration, status, failed step, the numbers of the run's summary and the cost. See
+`docs/monitoring.md`. The header of every page links to it.
+
 ## Terms
 
 - **HTTP Basic authentication:** the browser asks for a user name and password and sends them
@@ -117,6 +129,7 @@ bookmarked.
 
 - `src/jobfacts/web/app.py`: the app, authentication, headers, routes.
 - `src/jobfacts/web/params.py`: URL parameters to `search.Filters`.
-- `src/jobfacts/web/templates/index.html`, `src/jobfacts/web/static/style.css`: the page.
+- `src/jobfacts/web/templates/` (`base.html`, `index.html`, `runs.html`) and
+  `src/jobfacts/web/static/style.css`: the pages.
 - `NOTICE`: the licence of the design tokens used in the stylesheet.
 - `tests/test_web.py`.

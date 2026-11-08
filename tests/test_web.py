@@ -102,6 +102,7 @@ def test_health_reports_the_state_without_a_password(conn, seed):
         "database": True,
         "open_postings": 1,
         "last_collection_finished": "2026-11-08T06:00:00+00:00",
+        "last_daily_run": None,
         "embedding_model": "mistral-embed",
     }
 
@@ -109,6 +110,82 @@ def test_health_reports_the_state_without_a_password(conn, seed):
 @pytest.mark.db
 def test_health_without_any_collection_run(conn):
     assert make_client(conn).get("/health").json()["last_collection_finished"] is None
+
+
+@pytest.mark.db
+def test_health_includes_the_last_daily_run(conn):
+    conn.execute(
+        "INSERT INTO daily_runs (started_at, finished_at, status, cost_usd) VALUES "
+        "('2026-11-07T06:30:00+00', '2026-11-07T06:40:00+00', 'failed', 1.5), "
+        "('2026-11-08T06:30:00+00', '2026-11-08T06:41:00+00', 'ok', 0.2)"
+    )
+    run = make_client(conn).get("/health").json()["last_daily_run"]
+    assert run == {"finished_at": "2026-11-08T06:41:00+00:00", "status": "ok"}
+    conn.execute("INSERT INTO daily_runs (started_at) VALUES ('2026-11-09T06:30:00+00')")
+    run = make_client(conn).get("/health").json()["last_daily_run"]
+    assert run == {"finished_at": None, "status": "running"}
+
+
+@pytest.mark.db
+def test_health_and_runs_survive_a_database_without_the_table(conn):
+    conn.execute("DROP TABLE daily_runs")
+    # The fixture's search_path ends in `public` (for the pgvector type), where the real
+    # database has its own daily_runs: drop `public` here so the query cannot fall through.
+    conn.execute("SET search_path TO test_jobfacts")
+    client = make_client(conn)
+    assert client.get("/health").json()["last_daily_run"] is None
+    r = client.get("/runs", headers=basic())
+    assert r.status_code == 200 and "No daily run recorded yet" in r.text
+
+
+# ---------- /runs ----------
+
+
+def test_runs_needs_the_password():
+    client = make_client()
+    assert client.get("/runs").status_code == 401
+    assert client.get("/runs", headers=basic("wrong")).status_code == 401
+
+
+@pytest.mark.db
+def test_runs_shows_the_rows_in_zurich_time_and_escapes_text(conn):
+    conn.execute(
+        "INSERT INTO daily_runs (started_at, finished_at, status, failed_step, boards_ok, "
+        "boards_failed, new_postings, closed, relevant, extracted, embedded, errors, "
+        "cost_usd, warnings) VALUES "
+        "('2026-07-08T04:30:00+00', '2026-07-08T04:43:25+00', 'ok', NULL, 120, 2, 14, 3, 5, "
+        "5, 14, 0, 0.0421, '<script>alert(1)</script>'), "
+        "('2026-11-08T05:30:00+00', '2026-11-08T05:30:09+00', 'failed', 'collect<b>', "
+        "NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL)"
+    )
+    page = make_client(conn).get("/runs", headers=basic())
+    assert page.status_code == 200
+    html = page.text
+    assert "<script>alert" not in html and "&lt;script&gt;alert(1)" in html
+    assert "collect<b>" not in html and "collect&lt;b&gt;" in html
+    assert "2026-11-08 06:30" in html  # winter: UTC+1
+    assert "2026-07-08 06:30" in html  # summer: UTC+2
+    assert "13 min 25 s" in html and "9 s" in html
+    assert "0.042" in html
+    assert html.index("2026-11-08 06:30") < html.index("2026-07-08 06:30")  # newest first
+    assert 'href="/runs"' in make_client(conn).get("/", headers=basic()).text
+
+
+@pytest.mark.db
+def test_runs_shows_at_most_30_rows(conn):
+    conn.execute(
+        "INSERT INTO daily_runs (started_at, status) "
+        "SELECT '2026-01-01T06:00:00+00'::timestamptz + n * interval '1 day', 'ok' "
+        "FROM generate_series(0, 39) AS n"
+    )
+    html = make_client(conn).get("/runs", headers=basic()).text
+    assert html.count('<span class="status') == 30
+    assert "2026-02-09" in html and "2026-01-10" not in html  # days 40 down to 11 kept
+
+
+@pytest.mark.db
+def test_runs_without_rows(conn):
+    assert "No daily run recorded yet" in make_client(conn).get("/runs", headers=basic()).text
 
 
 # ---------- /api/search ----------

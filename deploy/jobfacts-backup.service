@@ -1,0 +1,10 @@
+[Unit]
+Description=jobfacts database backup (pg_dump, keeps the last 7)
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/home/ubuntu/jobfacts
+ExecStart=/home/ubuntu/jobfacts/deploy/backup.sh

@@ -1,0 +1,9 @@
+[Unit]
+Description=jobfacts database backup at 03:30 Zurich time
+
+[Timer]
+OnCalendar=*-*-* 03:30:00 Europe/Zurich
+Persistent=true
+
+[Install]
+WantedBy=timers.target

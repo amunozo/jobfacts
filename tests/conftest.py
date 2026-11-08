@@ -28,3 +28,9 @@ def conn():
     connection.execute(f"DROP SCHEMA {schema} CASCADE")
     connection.commit()
     connection.close()
+
+
+@pytest.fixture(autouse=True)
+def no_health_ping(monkeypatch):
+    """A developer's own JOBFACTS_HEALTHCHECK_URL must never be pinged by a test."""
+    monkeypatch.delenv("JOBFACTS_HEALTHCHECK_URL", raising=False)

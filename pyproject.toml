@@ -16,6 +16,7 @@ dependencies = [
     "pydantic>=2.14.2",
     "python-dotenv>=1.2.4",
     "typesafe-sdk>=0.7.5,<0.8",
+    "tzdata>=2026.6",
     "uvicorn>=0.54.0",
 ]
 
@@ -30,7 +31,11 @@ build-backend = "hatchling.build"
 packages = ["src/jobfacts"]
 
 [dependency-groups]
-dev = ["pytest>=8", "ruff>=0.6"]
+dev = [
+    "cryptography>=50.0.2",
+    "pytest>=8",
+    "ruff>=0.6",
+]
 # Local embedding model (Qwen3-Embedding on CPU). Not needed by the server or CI:
 # `uv run --group embed-local jobfacts embed --model qwen`.
 embed-local = ["sentence-transformers>=3", "torch"]

@@ -37,3 +37,8 @@ jobs:
       - run: uv run ruff check .
       - run: uv run ruff format --check .
       - run: uv run pytest
+      # Accuracy gate: re-applies the code rules to recorded model answers (no model calls, no
+      # database). Pull requests from forks get no secret; the flag turns that into a skip.
+      - run: uv run jobfacts gate check --skip-without-key
+        env:
+          JOBFACTS_GATE_KEY: ${{ secrets.JOBFACTS_GATE_KEY }}

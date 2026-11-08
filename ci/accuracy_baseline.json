@@ -1,0 +1,49 @@
+{
+  "date": "2026-11-08",
+  "model": "jev-1.14.0",
+  "code_version": 4,
+  "question_version": "4735310de61c",
+  "n_postings": 50,
+  "fields": {
+    "work_mode": {
+      "accuracy": 96.0,
+      "n": 50
+    },
+    "remote_from_switzerland": {
+      "accuracy": 96.0,
+      "n": 50
+    },
+    "office_cantons": {
+      "accuracy": 94.0,
+      "n": 50
+    },
+    "office_places": {
+      "accuracy": 98.0,
+      "n": 50
+    },
+    "german": {
+      "accuracy": 96.0,
+      "n": 50
+    },
+    "french": {
+      "accuracy": 98.0,
+      "n": 50
+    },
+    "min_years": {
+      "accuracy": 100.0,
+      "n": 50
+    },
+    "title_level": {
+      "accuracy": 98.0,
+      "n": 50
+    },
+    "contract_type": {
+      "accuracy": 96.0,
+      "n": 50
+    },
+    "seniority": {
+      "accuracy": 100.0,
+      "n": 50
+    }
+  }
+}

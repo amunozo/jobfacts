@@ -1,0 +1,140 @@
+# The production stack on the server: database, app, HTTPS proxy (and the daily job on demand).
+# Always run it through deploy/dc (it sets the project folder and the .env file), for example:
+#   deploy/dc up -d        deploy/dc ps        deploy/dc logs -f app
+# Designed for a 1 GB machine with swap: the memory limits below add up to about 700 MB for
+# the always-on containers; the daily job gets its own limit while it runs.
+# Not `jobfacts`: a clone in ~/jobfacts makes that the default project name of the root
+# docker-compose.yml (development), and the two stacks must not share containers or volumes.
+name: jobfacts-prod
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+x-app: &app
+  build:
+    context: .
+    dockerfile: Dockerfile
+  image: jobfacts:latest
+  env_file: .env
+  environment:
+    # Overrides any DATABASE_URL in .env (that one is the development database).
+    DATABASE_URL: postgresql://jobfacts:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/jobfacts
+    # There is no docker inside the container: `jobfacts daily` only waits for the database.
+    JOBFACTS_NO_DB_START: "1"
+  logging: *logging
+  # A tiny init process as PID 1: it forwards SIGTERM (`docker stop`, systemd) to Python, which
+  # as PID 1 would otherwise ignore it, and it reaps child processes.
+  init: true
+  depends_on:
+    db:
+      condition: service_healthy
+
+services:
+  db:
+    image: pgvector/pgvector:0.8.7-pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: jobfacts
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: jobfacts
+    # No `ports:` on purpose: the database is reachable only from the other containers
+    # (and from the host through `docker compose exec`), never from the internet.
+    command:
+      - postgres
+      - -c
+      - shared_buffers=128MB
+      - -c
+      - effective_cache_size=384MB
+      - -c
+      - work_mem=4MB
+      - -c
+      - maintenance_work_mem=64MB
+      - -c
+      - max_connections=20
+      - -c
+      - max_wal_size=512MB
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U jobfacts -d jobfacts"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    logging: *logging
+    mem_limit: 384m
+
+  app:
+    <<: *app
+    restart: unless-stopped
+    command: ["jobfacts", "serve", "--host", "0.0.0.0", "--port", "8000"]
+    # No `ports:`: only Caddy reaches the app, over the compose network.
+    # "Is the server answering?" only: /health is 503 while the database is empty or down,
+    # and that must not stop the first `up --wait` before the migrations have run.
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import socket; socket.create_connection(('127.0.0.1', 8000), 4).close()"
+      interval: 30s
+      timeout: 6s
+      retries: 3
+      start_period: 20s
+    mem_limit: 256m
+
+  caddy:
+    image: caddy:2.11.9-alpine
+    restart: unless-stopped
+    # Not root: it only needs to bind ports 80 and 443, which NET_BIND_SERVICE allows.
+    user: "1000:1000"
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt: ["no-new-privileges:true"]
+    logging: *logging
+    depends_on:
+      app:
+        condition: service_started
+      caddy-init:
+        condition: service_completed_successfully
+    environment:
+      JOBFACTS_DOMAIN: ${JOBFACTS_DOMAIN:?set JOBFACTS_DOMAIN in .env}
+    ports:
+      # HTTP_PORT and HTTPS_PORT exist only so a test on a laptop can avoid ports 80 and 443.
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data # the certificates: keep this volume, or Let's Encrypt is asked again
+      - caddy_config:/config
+    mem_limit: 96m
+
+  # One-shot: makes the Caddy volumes writable for the non-root user (a new volume is root's).
+  caddy-init:
+    image: caddy:2.11.9-alpine
+    user: "0:0"
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE]
+    command: ["chown", "-R", "1000:1000", "/data", "/config"]
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+    restart: "no"
+    logging: *logging
+    mem_limit: 32m
+
+  # `deploy/dc run --rm daily` = the daily job (collect, relevance, extraction, embeddings).
+  # The profile keeps `up -d` from starting it; the systemd timer runs it.
+  daily:
+    <<: *app
+    profiles: ["tools"]
+    command: ["jobfacts", "daily"]
+    mem_limit: 512m
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:

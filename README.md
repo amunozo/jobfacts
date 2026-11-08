@@ -59,6 +59,17 @@ the first thing to check, and today that means reading every posting.
   supporting quotes, no JavaScript), `/health` reports the database state.
   Everything except `/health` sits behind a password (HTTP Basic). It runs on
   the author's machine; it is not deployed. See `docs/api.md`.
+- **Light monitoring (Milestone 2).** `jobfacts daily` records each run in a
+  `daily_runs` table (status, failed step, the summary numbers, cost), shown at
+  `/runs`; `/health` reports the last run; with `JOBFACTS_HEALTHCHECK_URL` set
+  it pings an outside dead-man service (start, success, failure). Tested with
+  fake HTTP only: no real check has been set up yet. See `docs/monitoring.md`.
+- **Accuracy gate for CI (Milestone 2).** The held-out labels and the model's
+  recorded answers for those 50 postings are stored encrypted in `ci/`; a CI
+  step decrypts them with a secret key, re-applies the code rules and fails if
+  any of 10 fields loses more than 2 points against `ci/accuracy_baseline.json`.
+  It measures changes to the code rules on fixed answers, not model drift, and
+  skips when the key is not set (forks). See `docs/gate.md`.
 - **Evaluation.** A local labelling web app, reference labels, and an
   accuracy report per field and per posting language (`docs/labelling.md`).
 - **Search recall check.** `jobfacts search-eval` replays past job
@@ -118,9 +129,11 @@ longer texts.
 
 ## Not built yet
 
-- Deployment, a scheduled daily run, monitoring, and an accuracy gate in CI
-  (Milestone 2; the labels are private, so the gate needs a private runner or
-  stored results).
+- A running deployment (Milestone 2). The files and a step-by-step guide for
+  one AWS Lightsail server with Docker Compose exist (`docs/deploy.md`) and
+  were tested locally, but nothing is deployed, so there is no scheduled daily
+  run on a server and no outside alert configured yet.
+- A load test (Milestone 2).
 - PhD and stated-salary fields, salary estimates (Milestone 3).
 - Commute time and relisted roles (Milestone 4).
 
@@ -151,7 +164,8 @@ uv run ruff check . && uv run ruff format --check . && uv run pytest
 About 500 tests; the database tests use the compose database and are skipped
 locally when it is not running. GitHub Actions runs the same checks, with a
 PostgreSQL service, on every push and pull request; there the database tests
-fail instead of being skipped.
+fail instead of being skipped. A last step runs the accuracy gate
+(`jobfacts gate check`, `docs/gate.md`).
 
 ## Design rules
 

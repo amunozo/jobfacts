@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# `docker compose` for the production stack, from anywhere:  deploy/dc up -d | ps | logs -f app
+# Uses the repository folder as the project folder, so it reads ./.env and builds ./Dockerfile.
+set -euo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+exec docker compose --project-directory "$ROOT" -f "$ROOT/deploy/compose.prod.yml" "$@"

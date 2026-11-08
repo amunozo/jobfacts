@@ -127,21 +127,28 @@ class JevExtractor:
         order_values("x", {}, ordering)  # validates the name
         self.ordering = ordering
 
+    @staticmethod
+    def _question_parts() -> list[str]:
+        return [
+            "jev",
+            GENERAL_RULES,
+            MODEL,
+            f"threshold:{CANTON_THRESHOLD}",
+            f"none:{NONE}",
+            f"max_options:{MAX_OPTIONS}",
+            STATE_HEADER,
+            SENTENCE_QUESTION,
+            OFFICE_EVIDENCE_SUFFIX,
+        ]
+
+    def question_version(self) -> str:
+        """Hash of the questions and the input format, without `EXTRACTION_CODE_VERSION`: when
+        it changes, answers recorded earlier no longer answer today's questions (the accuracy
+        gate, `jobfacts.gate`, refuses them). A change of the code rules does not change it."""
+        return spec_hash("|".join(self._question_parts()))
+
     def spec_version(self) -> str:
-        extra = "|".join(
-            [
-                "jev",
-                GENERAL_RULES,
-                MODEL,
-                f"threshold:{CANTON_THRESHOLD}",
-                f"none:{NONE}",
-                f"max_options:{MAX_OPTIONS}",
-                STATE_HEADER,
-                SENTENCE_QUESTION,
-                OFFICE_EVIDENCE_SUFFIX,
-                f"code:{EXTRACTION_CODE_VERSION}",
-            ]
-        )
+        extra = "|".join([*self._question_parts(), f"code:{EXTRACTION_CODE_VERSION}"])
         if self.ordering != "original":
             extra += f"|order:{self.ordering}"  # default hash stays unchanged
         return spec_hash(extra)

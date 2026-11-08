@@ -1,21 +1,5 @@
-<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="robots" content="noindex, nofollow">
-<title>jobfacts</title>
-<link rel="stylesheet" href="/static/style.css">
-</head>
-<body>
-<header class="site-header">
-  <div class="wrap">
-    <a class="brand" href="/">jobfacts</a>
-    <span class="tagline">The facts a job posting hides</span>
-  </div>
-</header>
-
-<main class="wrap">
+{% extends "base.html" %}
+{% block content %}
 <form method="get" action="/" class="search">
   <div class="field wide">
     <label for="query">Search</label>
@@ -135,10 +119,4 @@
   {% if more_url %}<p><a class="more" href="{{ more_url }}">Show more</a></p>{% endif %}
 </section>
 {% endif %}
-</main>
-
-<footer class="site-footer">
-  <div class="wrap">Private search page. Style from the Lyne design tokens (ISC licence); not an SBB product.</div>
-</footer>
-</body>
-</html>
+{% endblock %}
