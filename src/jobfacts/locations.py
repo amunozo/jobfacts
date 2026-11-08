@@ -85,6 +85,10 @@ _COUNTRY_CODE = re.compile(r"(?<![^\W_])[A-Z]{2,3}(?![^\W_])")
 # "A | B". A slash without spaces ("Biel/Bienne") is part of a name.
 _SEGMENT_SEP = re.compile(r"[;|\n]|\s+/\s+")
 _CODE_PART = re.compile(r"\s*\(?([A-Z]{2})\)?\s*")
+_PAREN = re.compile(r"\([^)]*\)")
+_PIECE_SEP = re.compile(r"\s+(?:or|and)\s+|\s*&\s*", re.I)
+# Teamtailor adds the remote status as a segment of its own: "Berlin, Germany / (fully)".
+_REMOTE_STATUS = re.compile(r"\s*\(\s*(?:fully|hybrid|onsite|temporary|remote|none)\s*\)\s*", re.I)
 
 
 def _norm_char(ch: str) -> str:
@@ -334,52 +338,76 @@ def place_by_key(key: str) -> Place | None:
 # ----- scanning ---------------------------------------------------------------------------
 
 
+def _clean_part(part: str, index: _Index) -> str:
+    """A comma part with its parenthesised decorations ("(Hybrid)", "(Remote)", "(ZH)") blanked;
+    a parenthesis that names a foreign country ("Munich (Germany)") stays."""
+
+    def keep(m: re.Match) -> str:
+        return m.group() if index.foreign.search(normalize(m.group())) else " " * len(m.group())
+
+    return _PAREN.sub(keep, part)
+
+
+def _is_whole_swiss_name(piece: str) -> bool:
+    text = piece.strip()
+    if not text:
+        return False
+    hits = _scan(text, True)
+    if len(hits) != 1 or hits[0].start != 0 or hits[0].end != len(text):
+        return False
+    return not (len(text) == 2 and text.isupper())  # "AU", "LU": a code, not a city
+
+
 def _is_foreign(segment: str) -> bool:
     """True if one place of a location field names a foreign country and not Switzerland.
 
-    The comma-separated parts of the place are checked: the country is a part of its own
-    ("Paris, France"). Some boards also join several cities with commas ("Geneva, London,
-    Singapore"), where "Singapore" is a city: a part that is entirely a Swiss place and does
-    not stand right before the country part keeps the place Swiss.
+    The rule is narrow, because losing a Swiss job costs more than keeping a foreign one:
+    - a country counts only as a comma part of its own ("Paris, France", "(Germany)") or as the
+      last word(s) of a part ("Berlin Germany", "Munich (Germany)"), never inside a street or
+      place name ("Route de France 100B");
+    - an ISO code counts only as the last comma part, and never a canton code;
+    - the place stays Swiss if any comma part is entirely a Swiss name once split on " or ",
+      " and ", " & " ("Zurich or Munich, Germany", "Geneva, Singapore"). So "Rheinfelden,
+      Baden-Wurttemberg, Germany" stays Swiss: a name clash with a whole Swiss name is the cost
+      of never losing a Swiss job.
     """
     index = _load()
-    norm = normalize(segment)
-    if index.countries.search(norm) or any(
+    if index.countries.search(normalize(segment)) or any(
         m.group() in index.country_codes for m in _COUNTRY_CODE.finditer(segment)
     ):
         return False
-    spans: list[tuple[int, int]] = []
-    pos = 0
-    for part in segment.split(","):
-        spans.append((pos, pos + len(part)))
-        pos += len(part) + 1
-    foreign = set()
-    for i, (a, b) in enumerate(spans):
-        code = _CODE_PART.fullmatch(segment[a:b]) if i == len(spans) - 1 and i > 0 else None
-        if index.foreign.search(norm[a:b]) or (code and code.group(1) in index.foreign_codes):
-            foreign.add(i)
+    parts = segment.split(",")
+    cleaned = [_clean_part(p, index) for p in parts]
+    foreign = False
+    for i, part in enumerate(cleaned):
+        low = normalize(part)
+        # a country is the whole part or ends it, ignoring a closing parenthesis
+        foreign = foreign or any(
+            not low[m.end() :].strip(" )") for m in index.foreign.finditer(low)
+        )
+        if i == len(parts) - 1 and i > 0:
+            code = _CODE_PART.fullmatch(parts[i])
+            foreign = foreign or bool(code and code.group(1) in index.foreign_codes)
     if not foreign:
         return False
-    for hit in _scan(segment, True):
-        if hit.end - hit.start == 2 and segment[hit.start : hit.end].isupper():
-            continue  # "AU", "LU": a country or canton code, not a city
-        for i, (a, b) in enumerate(spans):
-            if a <= hit.start and hit.end <= b and i not in foreign:
-                alone = not segment[a : hit.start].strip() and not segment[hit.end : b].strip()
-                if alone and i + 1 not in foreign:
-                    return False
-    return True
+    return not any(
+        _is_whole_swiss_name(piece) for part in cleaned for piece in _PIECE_SEP.split(part)
+    )
 
 
-def _swiss_part(text: str) -> str:
+def _swiss_part(text: str, foreign_veto: bool = True) -> str:
     """`text` with the places that name a foreign country blanked out (same length, so
-    offsets stay valid). "Zurich, Switzerland / Paris, France" keeps only the Zurich place."""
+    offsets stay valid). "Zurich, Switzerland / Paris, France" keeps only the Zurich place.
+    A segment that is only a remote status in parentheses ("(fully)") is always blanked: it is
+    not a place. `foreign_veto=False` keeps the foreign places (for text with no structure,
+    like the slug of a URL)."""
     out: list[str] = []
     pos = 0
     for sep in [*_SEGMENT_SEP.finditer(text), None]:
         end = sep.start() if sep else len(text)
         segment = text[pos:end]
-        out.append(" " * len(segment) if _is_foreign(segment) else segment)
+        drop = _REMOTE_STATUS.fullmatch(segment) or (foreign_veto and _is_foreign(segment))
+        out.append(" " * len(segment) if drop else segment)
         if sep:
             out.append(sep.group())
             pos = sep.end()
@@ -487,17 +515,20 @@ def _country_signal(text: str, location_field: bool) -> bool:
     )
 
 
-def canton_hints(text: str, *, location_field: bool = False) -> list[str]:
+def canton_hints(
+    text: str, *, location_field: bool = False, foreign_veto: bool = True
+) -> list[str]:
     """Cantons suggested by names in `text` (whole register, canton names, location codes).
 
     Order of first appearance. A name that exists in several cantons ("Pfäffikon", "Buchs")
     suggests all of them. In a location field a two-letter canton code ("SG") counts when
     another Swiss signal (a place, a canton name, "Switzerland", "CH") is present, and a place
     of a multi-place string ("A / B", "A; B", "A | B") that names a foreign country and not
-    Switzerland is ignored ("Chateauneuf sur Isere, France").
+    Switzerland is ignored ("Chateauneuf sur Isere, France"); `foreign_veto=False` turns
+    that off.
     """
     if location_field:
-        text = _swiss_part(text)
+        text = _swiss_part(text, foreign_veto)
     hits = _scan(text, location_field)
     found: list[str] = []
     for h in hits:
@@ -513,14 +544,17 @@ def canton_hints(text: str, *, location_field: bool = False) -> list[str]:
     return found
 
 
-def mentions_switzerland(text: str, *, location_field: bool = False) -> bool:
+def mentions_switzerland(
+    text: str, *, location_field: bool = False, foreign_veto: bool = True
+) -> bool:
     """True if `text` names a Swiss place, a canton, or the country.
 
     In a location field, a place that names a foreign country (and not Switzerland) does not
     count, even if part of its name is a Swiss place: "Chateauneuf sur Isere, France".
+    `foreign_veto=False` turns that off (a URL slug has no structure to judge).
     """
     if location_field:
-        text = _swiss_part(text)
-    return bool(canton_hints(text, location_field=location_field)) or _country_signal(
-        text, location_field
-    )
+        text = _swiss_part(text, foreign_veto)
+    return bool(
+        canton_hints(text, location_field=location_field, foreign_veto=foreign_veto)
+    ) or _country_signal(text, location_field)

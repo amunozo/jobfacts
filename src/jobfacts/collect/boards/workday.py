@@ -137,10 +137,16 @@ def url_location_text(url: str) -> str:
 
 
 def url_is_candidate(url: str) -> bool:
-    """True if the URL's location segment names a Swiss place or says remote."""
+    """True if the URL's location segment names a Swiss place or says remote.
+
+    A slug has no structure ("Manufacture VAC LE BRASSUS Route de France 100B"), so the
+    foreign-country veto is off: this only decides which pages to fetch, and eligibility
+    checks the structured location later.
+    """
     text = url_location_text(url)
     return bool(text) and (
-        mentions_switzerland(text, location_field=True) or bool(_REMOTE.search(text))
+        mentions_switzerland(text, location_field=True, foreign_veto=False)
+        or bool(_REMOTE.search(text))
     )
 
 

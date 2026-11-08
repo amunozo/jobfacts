@@ -165,6 +165,17 @@ def test_prefilter_keeps_swiss_and_remote_skips_others():
         assert not workday.url_is_candidate(u(place, "Role_R-1")), place
 
 
+def test_prefilter_does_not_veto_foreign_looking_slugs():
+    # a slug has no structure; eligibility checks the structured location later
+    keep = [
+        "Manufacture-VAC-LE-BRASSUS-Route-de-France-100B-CHLE0003",
+        "Zurich---London-UK",
+        "Geneva-Paris-France",
+    ]
+    for place in keep:
+        assert workday.url_is_candidate(u(place, "Role_R-1")), place
+
+
 # --- rate limiter ----------------------------------------------------------------------------
 
 

@@ -213,17 +213,17 @@ def test_small_postal_spillover_into_another_canton_is_ignored():
         "MONTE CARLO, Monaco",  # "Monte" is a register name
         "CHATEAUNEUF SUR ISERE, France",  # a Châteauneuf exists in Valais
         "12 Rue de la Gare, 75001 Paris, France",  # "Rue" is a register name
-        "Zug, Germany",  # a Swiss name directly before a foreign country
+        "Zug, Germany",  # "Zug" is a whole part, but the ", Germany" cue still ignores it
         "Sion, Frankreich",
         "Châteauneuf, Francia",
         "Châteauneuf, Italie",
-        "Lancy, Royaume-Uni",
-        "Aarau, United States of America",
         "Field Sales (Canada), Canada",  # "Sales" is a register name
-        "Wil, Spain / Au, Poland",
-        "Bern, DE",  # an ISO code as the last part
-        "Bern, (US)",
-        "Sion, JP",
+        "Sales (Canada), Canada",  # the parenthesis names a country, so it is not a decoration
+        "Luxembourg, LU",  # "LU" is a canton code, never a city that exempts the place
+        "North Sydney, AU",
+        "Port Elizabeth, ZA",  # "Port" is a register name, not the whole part
+        "Berlin, Germany / (fully)",
+        "Munich (Germany)",
     ],
 )
 def test_foreign_place_is_not_swiss(text):
@@ -251,6 +251,81 @@ def test_foreign_place_is_not_swiss(text):
 def test_one_swiss_place_keeps_a_multi_place_string_swiss(text, cantons):
     assert mentions_switzerland(text, location_field=True)
     assert canton_hints(text, location_field=True) == cantons
+
+
+@pytest.mark.parametrize(
+    ("text", "canton"),
+    [
+        ("Geneva, Luxembourg", "GE"),  # a part that is entirely a Swiss place keeps it Swiss
+        ("Geneva, Singapore", "GE"),
+        ("Zurich, Hong Kong", "ZH"),
+        ("Zug, Munich (Germany)", "ZG"),
+        ("Zurich or Munich, Germany", "ZH"),
+        ("Zurich and Berlin, Germany", "ZH"),
+        ("Zurich & Berlin, Germany", "ZH"),
+        ("Zurich (Hybrid), Remote, US", "ZH"),
+        ("Lausanne, Paris (France)", "VD"),
+        ("Zurich, Berlin Germany", "ZH"),
+        # accepted cost: a whole Swiss name beside a foreign country stays Swiss (recall first)
+        ("Rheinfelden, Baden-Württemberg, Germany", "AG"),
+        ("Lancy, Royaume-Uni", "GE"),
+        ("Bern, DE", "BE"),
+        ("Sion, JP", "VS"),
+    ],
+)
+def test_a_whole_swiss_part_keeps_the_place_swiss(text, canton):
+    assert mentions_switzerland(text, location_field=True)
+    assert canton_hints(text, location_field=True) == [canton]
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Route de France 100B",  # a country word inside a street name is not a country
+        "Rue de France, Geneva",
+        "Manufacture VAC LE BRASSUS Route de France 100B CHLE0003",
+    ],
+)
+def test_a_country_word_inside_a_name_never_vetoes(text):
+    assert not locations._is_foreign(text)
+
+
+def test_country_word_must_be_a_part_or_end_a_part():
+    assert locations._is_foreign("Paris, France")
+    assert locations._is_foreign("Paris France")
+    assert locations._is_foreign("(Germany)")
+    assert not locations._is_foreign("Lausanne, Route de France")  # not at the end of a part...
+    assert not locations._is_foreign("France Street, Zug")
+
+
+def test_the_veto_can_be_switched_off_for_url_slugs():
+    # a slug has no structure: "UK" ends it but no part is a whole Swiss name
+    slug = "Zurich   London UK"
+    assert not mentions_switzerland(slug, location_field=True)
+    assert mentions_switzerland(slug, location_field=True, foreign_veto=False)
+    assert canton_hints(slug, location_field=True, foreign_veto=False) == ["ZH"]
+    assert not mentions_switzerland("Monte Carlo, Monaco", location_field=True)
+    assert mentions_switzerland("Monte Carlo, Monaco", location_field=True, foreign_veto=False)
+    brassus = "Manufacture VAC LE BRASSUS Route de France 100B CHLE0003"
+    assert mentions_switzerland(brassus, location_field=True, foreign_veto=False)
+    assert not mentions_switzerland("Route de France 100B", location_field=True, foreign_veto=False)
+
+
+@pytest.mark.parametrize("status", ["fully", "hybrid", "onsite", "temporary", "Fully", "remote"])
+def test_a_teamtailor_remote_status_segment_is_not_a_place(status):
+    # "Fully" is a Valais commune; Teamtailor appends the remote status as a segment of its own
+    text = f"Berlin, Germany / ({status})"
+    assert not mentions_switzerland(text, location_field=True)
+    assert canton_hints(text, location_field=True) == []
+    assert not find_places(text, ["VS"], location_field=True)
+    assert not mentions_switzerland(f"({status})", location_field=True)
+
+
+def test_fully_still_matches_without_parentheses_or_with_a_swiss_signal():
+    assert canton_hints("Fully", location_field=True) == ["VS"]
+    assert canton_hints("Fully, Valais", location_field=True) == ["VS"]
+    assert canton_hints("Zurich / (fully)", location_field=True) == ["ZH"]
+    assert place_keys("Fully", ["VS"], location_field=True)
 
 
 def test_foreign_place_of_a_multi_place_string_gives_no_canton_or_place():
@@ -281,6 +356,7 @@ def test_country_codes_veto_only_when_they_are_not_canton_codes():
     assert mentions_switzerland("Zurich, CH", location_field=True)
     assert not mentions_switzerland("Paris, FR", location_field=True)  # no Swiss place anyway
     assert not mentions_switzerland("Tbilisi, GE", location_field=True)
+    assert not mentions_switzerland("Sydney, AU", location_field=True)
     for code in ("FR", "GE", "AG", "SG", "TI", "NE", "BE", "LU", "GR", "AR"):
         assert code not in locations._load().foreign_codes
     assert {"DE", "US", "IT", "IN", "AU"} <= locations._load().foreign_codes
