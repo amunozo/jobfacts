@@ -34,6 +34,11 @@ with the same generic title at one employer are shown as one group with both lin
 
 ## Query
 
+By default (`--mode hybrid`, `--model mistral`) the query is also embedded and the full-text and
+meaning rankings are fused (see "Search by meaning" below); if the query cannot be embedded the
+search falls back to words only, with a warning. `--mode words` is the plain full-text search
+described here, with no API call.
+
 PostgreSQL full-text search over title + description (`search_tsv`, a generated
 column with a GIN index, migration `006_search.sql`). It uses the `simple`
 configuration (no stemming): postings are in English, German and French, and one
@@ -58,6 +63,8 @@ description matches. Results are ordered by `ts_rank`; with no query, newest fir
 | `--seniority junior,mid` | Derived seniority is one of these. |
 | `--new-days N` | First seen in the last N days. |
 | `--limit N` | Jobs (groups) shown (default 20). The header gives the total number of groups. |
+| `--mode hybrid\|words\|meaning` | Ranking: `hybrid` (default), `words`, `meaning` (below). |
+| `--model mistral\|openai\|qwen` | Embedding model for `hybrid` and `meaning` (default `mistral`). |
 | `--evidence` | Print the supporting sentence of each fact under the row. |
 | `--json` | JSON (`{"total": n, "results": [...]}`) for other programs. |
 
@@ -175,3 +182,94 @@ counts. When the application predates the employer's first successful read, a `f
 the first-seen date. The report also counts applications per link
 source (linkedin, hiring.cafe, ats-direct, other, none), has one table per non-found outcome,
 and lists the `not_covered` companies so name-matching misses can be spotted by eye.
+
+## Search by meaning (Milestone 2, step 1)
+
+```
+uv run jobfacts embed --model mistral|openai|qwen [--limit N] [--char-budget N]
+uv run jobfacts search "query" [--mode hybrid|words|meaning] [--model mistral|openai|qwen]
+uv run jobfacts meaning-eval --phrases FILE --applications DIR --dates FILE [--models a,b] [--out PATH]
+```
+
+An embedding is a list of numbers (a vector) that a model makes from a text so that texts with
+a similar meaning get vectors that point the same way. "ML engineer" and "engineer for machine
+learning" share almost no words but land close together. Search by meaning embeds the query,
+then ranks postings by cosine similarity to it (`<=>` in pgvector is the cosine distance).
+
+**Pool.** `jobfacts embed` embeds every board posting, open or closed, whose relevance score of
+the current Jev model is at or above `jev.RELEVANCE_THRESHOLD` (closed ones are needed for the
+evaluation). `embed.POOL_FROM` defines it once. Application postings are never embedded.
+
+**Text and budget.** `embed.embedding_text`: title, blank line, description, cut to a character
+budget that is set per model in `embed.CHAR_BUDGETS`: Mistral 6000, OpenAI 6000, Qwen 800 (the
+local model is too slow on a CPU for long texts, the API models cost cents; the first comparison
+ran at 800 for all three, see docs/decisions.md). `--char-budget N` overrides it. Each vector
+stores the SHA-256 of its text (`text_hash`), the budget (`char_budget`) and the posting's
+`content_hash` at embed time. A rerun skips a posting whose text at this budget is unchanged
+(it only refreshes the stored content hash if the posting changed after the cut), re-embeds
+one whose text changed, and re-embeds everything when run with another budget. Vectors are stored per (posting, model), so the
+models sit side by side; the `vector` column has no fixed dimension (1024, 1536, 1024).
+Queries are embedded when asked (one API call or one local forward pass). Qwen3-Embedding gets
+its instruction line (`Instruct: <job-search task>\nQuery: <q>`) on queries only.
+
+**Stale and missing vectors.** `search.stale_embedding_count(conn, model_id)` counts pool
+postings with no vector for the model or whose vector's `content_hash` differs from the
+posting's current one. `jobfacts search` in `meaning` and `hybrid` mode prints a warning on
+stderr when it is above 0 (like the stale relevance rows), and `meaning-eval` does the same
+in the report and on stderr, and also warns when a model's vectors have mixed budgets. The
+report states each model's budget(s) as read from the stored rows. `jobfacts daily` runs
+`embed` for the default model (`embed.DEFAULT_MODEL`, Mistral) after relevance and extraction,
+with the cost guard; a missing key, an API error or the guard only prints a warning and the
+daily run continues (its summary line reports the number embedded).
+
+**Retries.** API calls retry on rate limits (429), server errors (5xx), timeouts and connection
+errors: up to 6 tries for a batch of documents (wait 2, 4, 8 ... seconds, or the server's
+`Retry-After`, at most 120 s), 2 tries for a query so that a search does not hang. Other
+errors (bad key, bad request) are raised at once. A run that still fails keeps the chunks
+already stored; running it again continues.
+
+**Cost guard.** Before any call `embed` estimates the tokens as characters / 3 and refuses to
+start when the estimate costs more than $2. It then prints the tokens the provider counted and
+the cost (Mistral $0.10, OpenAI $0.02 per million tokens; Qwen is local and free).
+
+**Local model.** Qwen3-Embedding-0.6B needs `sentence-transformers` and torch (CPU wheels),
+in the optional uv group `embed-local`, which the server and CI do not install. Run it with
+`uv run --group embed-local jobfacts embed --model qwen`. It runs in float32 with 8 threads
+(the bfloat16 default of the library was 2-4 times slower on this CPU).
+
+**Search modes.** `--mode hybrid` is the default, with `--model mistral`: it embeds the query,
+runs the full-text and the meaning queries with the same filters, takes the best 200 postings of
+each and fuses them with reciprocal rank fusion: a posting scores the sum of 1 / (60 + position)
+over the lists it is in. RRF uses positions only, so it needs no scaling between a text rank and
+a similarity. A posting in only one list still counts. Only these (at most 400) postings are
+candidates, so in hybrid `total` counts the jobs among them, not all matches. `--mode meaning`
+ranks by similarity alone: every posting that has a vector for `--model` and passes the filters
+is a candidate, so a weak match is still listed. `--mode words` is the full-text search above,
+unchanged, and never calls an API. Every filter applies in all modes; grouping of duplicates and
+`--json` work as before (`rank` is the similarity, the RRF score or the text rank).
+
+**Fallback.** If the query cannot be embedded (no API key, network error, API error after the
+retries), hybrid falls back to `words` and prints one warning on stderr; stdout stays valid
+(`--json` is still JSON), so other programs that call `jobfacts search --json` keep working
+offline. Hybrid without a query (only filters) is the plain filter list: no API call and no
+warning. An explicit `--mode meaning` has no words to fall back to and exits with an error;
+an explicit `--mode hybrid` or `meaning` with an empty query is an error too. Filter errors
+(unknown canton, ...) are reported before any API call.
+
+**Index.** Exact search (a scan of the stored vectors) is used: the pool is a few thousand
+rows. No HNSW index: with filters an approximate index can drop matching postings; one is
+added only if the load test shows the vector scan as the bottleneck (decision of 2026-11-08).
+
+### Which model? (meaning-eval)
+
+A replay like `search-eval`: the postings matched to the owner's past applications (the same
+matching code) are the wanted jobs, restricted to the pool; those with outcome `found` or
+`filtered` are "within scope". Every phrase of the phrases file is run as a query with each
+method over the whole pool, with no canton or eligibility filter (ranking only). Rankings are
+of jobs (duplicates grouped as in search). For a wanted job the best rank over all phrases is
+kept, as if the owner had run all phrases; a job matched to several postings counts its best
+posting. Reported: recall@10, @20, @50 (share of wanted jobs within that rank for at least one
+phrase), MRR of the best rank (0 when no phrase ranks the job), Wilson 95% interval for
+recall@20, the wanted jobs each phrase puts in its top 20, and every wanted job's best rank per
+method. Methods: `words`, `meaning:<model>`, `hybrid:<model>`. The report goes to
+`data/private/reports/meaning_eval_<date>.md` (git-ignored).

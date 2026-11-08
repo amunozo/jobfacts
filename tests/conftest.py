@@ -19,7 +19,8 @@ def conn():
     schema = "test_jobfacts"
     connection.execute(f"DROP SCHEMA IF EXISTS {schema} CASCADE")
     connection.execute(f"CREATE SCHEMA {schema}")
-    connection.execute(f"SET search_path TO {schema}")
+    # public stays on the path: the pgvector extension (type `vector`) may live there
+    connection.execute(f"SET search_path TO {schema}, public")
     connection.commit()
     db.migrate(connection)
     yield connection

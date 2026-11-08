@@ -1,8 +1,9 @@
+import json
 from dataclasses import replace
 
 import pytest
 
-from jobfacts import search
+from jobfacts import embed, search
 from jobfacts.extract import jev, store
 from jobfacts.extract.base import Result
 from jobfacts.search import Filters, SearchError, build
@@ -543,3 +544,238 @@ def test_one_duplicate_reads_location_singular(conn, seed):
     set_location(conn, seed.add(title="AI Engineer", days_old=2), "Bern")
     hits, total = search.search(conn, Filters())
     assert "\n   + 1 more location: Bern" in search.format_table(hits, total)
+
+
+# ---------- meaning and hybrid ----------
+
+MODEL = "fake-model"
+
+
+def vectors(conn, mapping, model=MODEL):
+    """Store tiny fake vectors {posting id: vector}."""
+    items = [(pid, "t", "h", vec) for pid, vec in mapping.items()]  # content hash h = the seed's
+    embed.save_embeddings(conn, model, items, 800)
+
+
+def run(conn, mode, query="anything", vector=(1.0, 0.0, 0.0), **kw):
+    f = Filters(query=query, mode=mode, model=MODEL, **kw)
+    hits, total = search.search(conn, f, query_vector=list(vector))
+    return [h.title for h in hits], total
+
+
+def test_rrf_adds_reciprocal_ranks():
+    fused = search.rrf([[1, 2, 3], [3, 2]], k=60)
+    scores = dict(fused)
+    assert scores[1] == pytest.approx(1 / 61)
+    assert scores[2] == pytest.approx(1 / 62 + 1 / 62)
+    assert scores[3] == pytest.approx(1 / 63 + 1 / 61)
+    assert [i for i, _ in fused] == [3, 2, 1]
+    assert search.rrf([]) == []
+
+
+def test_rrf_ties_go_to_the_lower_id():
+    assert [i for i, _ in search.rrf([[5], [4]])] == [4, 5]
+
+
+def test_meaning_and_hybrid_need_a_query_and_a_model():
+    with pytest.raises(SearchError):
+        Filters(mode="meaning", model=MODEL).validate()
+    with pytest.raises(SearchError):
+        Filters(mode="hybrid", query="x").validate()
+    with pytest.raises(SearchError):
+        Filters(mode="nope").validate()
+    with pytest.raises(SearchError):  # hybrid is built by search(), from two queries
+        build(Filters(mode="hybrid", query="x", model=MODEL))
+    with pytest.raises(SearchError):
+        build(Filters(mode="meaning", query="x", model=MODEL))
+
+
+def test_meaning_sql_joins_the_model_and_keeps_the_filters():
+    sql, params = build(
+        Filters(mode="meaning", query="x", model=MODEL, cantons=["ZH"]), [0.5, 0.5], top=200
+    )
+    assert "posting_embeddings" in sql and "<=>" in sql and "x.office_cantons" in sql
+    assert "p.closed_at IS NULL" in sql and sql.endswith("LIMIT %(top)s")
+    assert params["emb_model"] == MODEL and params["qvec"] == "[0.5,0.5]" and params["top"] == 200
+    assert "search_tsv" not in sql
+
+
+@pytest.mark.db
+def test_meaning_ranks_by_cosine_similarity(conn, seed):
+    a = seed.add(title="near")
+    b = seed.add(title="middle")
+    c = seed.add(title="far")
+    seed.add(title="no vector")
+    vectors(conn, {a: [1.0, 0.0, 0.0], b: [1.0, 1.0, 0.0], c: [0.0, 1.0, 0.0]})
+    titles, total = run(conn, "meaning")
+    assert titles == ["near", "middle", "far"] and total == 3  # no vector: not ranked
+    hits, _ = search.search(
+        conn, Filters(query="q", mode="meaning", model=MODEL), query_vector=[1.0, 0.0, 0.0]
+    )
+    assert hits[0].rank == pytest.approx(1.0) and hits[1].rank == pytest.approx(
+        1 - 0.2929, abs=1e-3
+    )
+
+
+@pytest.mark.db
+def test_meaning_ignores_other_models_with_other_dimensions(conn, seed):
+    a = seed.add(title="a")
+    vectors(conn, {a: [1.0, 0.0, 0.0]})
+    vectors(conn, {a: [1.0, 0.0]}, model="other")
+    assert run(conn, "meaning") == (["a"], 1)
+
+
+@pytest.mark.db
+def test_meaning_applies_every_filter_and_the_usual_exclusions(conn, seed):
+    zh = seed.add(title="zh", cantons=("ZH",))
+    be = seed.add(title="be", cantons=("BE",))
+    de = seed.add(title="de", german="required_fluent")
+    closed = seed.add(title="closed", closed=True)
+    irrelevant = seed.add(title="irrelevant", relevant=False)
+    vectors(conn, dict.fromkeys([zh, be, de, closed, irrelevant], [1.0, 0.0, 0.0]))
+    assert set(run(conn, "meaning")[0]) == {"zh", "be", "de"}
+    assert run(conn, "meaning", cantons=["BE"])[0] == ["be"]
+    assert set(run(conn, "meaning", german_max="intermediate")[0]) == {"zh", "be"}
+
+
+@pytest.mark.db
+def test_meaning_groups_duplicates_like_words(conn, seed):
+    a = seed.add(title="Same Job")
+    b = seed.add(title="same job")
+    vectors(conn, {a: [1.0, 0.0, 0.0], b: [0.9, 0.1, 0.0]})
+    hits, total = search.search(
+        conn, Filters(query="q", mode="meaning", model=MODEL), query_vector=[1.0, 0.0, 0.0]
+    )
+    assert total == 1 and len(hits[0].duplicates) == 1
+
+
+@pytest.mark.db
+def test_hybrid_fuses_words_and_meaning(conn, seed):
+    both = seed.add(title="words and meaning", desc="We need a unicorn wrangler.")
+    words_only = seed.add(title="words only", desc="unicorn unicorn unicorn wrangler")
+    meaning_only = seed.add(title="meaning only", desc="We herd horned horses.")
+    vectors(
+        conn,
+        {
+            both: [1.0, 0.0, 0.0],
+            words_only: [0.0, 0.0, 1.0],
+            meaning_only: [0.99, 0.01, 0.0],
+        },
+    )
+    words, _ = run(conn, "words", query="unicorn wrangler")
+    assert set(words) == {"words and meaning", "words only"}
+    titles, total = run(conn, "hybrid", query="unicorn wrangler")
+    assert titles[0] == "words and meaning" and set(titles) == set(words) | {"meaning only"}
+    assert total == 3
+    hits, _ = search.search(
+        conn,
+        Filters(query="unicorn wrangler", mode="hybrid", model=MODEL),
+        query_vector=[1.0, 0.0, 0.0],
+    )
+    assert hits[0].rank > 1 / 61  # in both lists: more than one list's best score
+
+
+@pytest.mark.db
+def test_hybrid_applies_filters_to_both_lists(conn, seed):
+    zh = seed.add(title="zh job", desc="unicorn wrangler", cantons=("ZH",))
+    be = seed.add(title="be job", desc="unicorn wrangler", cantons=("BE",))
+    far_be = seed.add(title="be meaning", desc="horses", cantons=("BE",))
+    vectors(conn, {zh: [1.0, 0, 0], be: [1.0, 0, 0], far_be: [1.0, 0, 0]})
+    titles, _ = run(conn, "hybrid", query="unicorn wrangler", cantons=["BE"])
+    assert set(titles) == {"be job", "be meaning"}
+
+
+# ---------- stale and missing vectors; the command line (default hybrid, fallback) ----------
+
+
+@pytest.mark.db
+def test_stale_embedding_count_counts_missing_and_changed(conn, seed):
+    fresh = seed.add(title="fresh")
+    changed = seed.add(title="changed")
+    seed.add(title="missing")
+    seed.add(title="not in the pool", relevant=False)
+    vectors(conn, {fresh: [1.0, 0.0, 0.0], changed: [1.0, 0.0, 0.0]})
+    assert search.stale_embedding_count(conn, MODEL) == 1  # only "missing"
+    conn.execute("UPDATE postings SET content_hash = 'new' WHERE id = %s", (changed,))
+    assert search.stale_embedding_count(conn, MODEL) == 2
+    assert search.stale_embedding_count(conn, "other-model") == 3  # no vectors for it
+
+
+class QueryEmbedder:
+    alias, model = "mistral", "mistral-embed"
+
+    def __init__(self, vector=(1.0, 0.0, 0.0), error=None):
+        self.vector, self.error, self.queries = list(vector), error, []
+
+    def embed_query(self, text):
+        self.queries.append(text)
+        if self.error:
+            raise self.error
+        return self.vector
+
+
+def cli_search(conn, monkeypatch, capsys, embedder, *argv):
+    import contextlib
+
+    from jobfacts import cli, db
+
+    monkeypatch.setattr(db, "connect", lambda: contextlib.nullcontext(conn))
+    monkeypatch.setattr(embed, "make_embedder", lambda alias: embedder)
+    code = cli.main(["search", *argv])
+    out = capsys.readouterr()
+    return code, out.out, out.err
+
+
+@pytest.mark.db
+def test_search_defaults_to_hybrid_with_the_default_model(conn, seed, monkeypatch, capsys):
+    near = seed.add(title="near", desc="horses")
+    seed.add(title="words", desc="unicorn wrangler")
+    vectors(conn, {near: [1.0, 0.0, 0.0]}, model="mistral-embed")
+    fake = QueryEmbedder()
+    code, out, err = cli_search(conn, monkeypatch, capsys, fake, "unicorn wrangler", "--json")
+    titles = {r["title"] for r in json.loads(out)["results"]}
+    assert code == 0 and titles == {"near", "words"} and fake.queries == ["unicorn wrangler"]
+    assert "warning" in err and "1 pool postings" in err  # "words" has no vector: missing
+
+
+@pytest.mark.db
+def test_search_falls_back_to_words_when_the_query_cannot_be_embedded(
+    conn, seed, monkeypatch, capsys
+):
+    near = seed.add(title="near", desc="horses")
+    seed.add(title="words", desc="unicorn wrangler")
+    vectors(conn, {near: [1.0, 0.0, 0.0]}, model="mistral-embed")
+    fake = QueryEmbedder(error=KeyError("MISTRAL_API_KEY"))
+    code, out, err = cli_search(conn, monkeypatch, capsys, fake, "unicorn wrangler", "--json")
+    assert code == 0
+    assert [r["title"] for r in json.loads(out)["results"]] == ["words"]  # valid JSON, words only
+    assert err.count("searching by words only") == 1 and "MISTRAL_API_KEY" in err
+    assert "pool postings have no current" not in err  # no vector warning in words mode
+
+
+@pytest.mark.db
+def test_search_without_a_query_is_the_plain_filter_list(conn, seed, monkeypatch, capsys):
+    seed.add(title="a")
+    fake = QueryEmbedder(error=RuntimeError("must not be called"))
+    code, out, err = cli_search(conn, monkeypatch, capsys, fake, "--json")
+    assert code == 0 and fake.queries == [] and "vector" not in err
+    assert [r["title"] for r in json.loads(out)["results"]] == ["a"]
+
+
+@pytest.mark.db
+def test_search_words_mode_never_embeds_and_explicit_modes_report_errors(
+    conn, seed, monkeypatch, capsys
+):
+    seed.add(title="words", desc="unicorn wrangler")
+    fake = QueryEmbedder(error=RuntimeError("must not be called"))
+    code, out, _ = cli_search(
+        conn, monkeypatch, capsys, fake, "unicorn", "--mode", "words", "--json"
+    )
+    assert code == 0 and fake.queries == [] and json.loads(out)["total"] == 1
+    code, _, err = cli_search(conn, monkeypatch, capsys, fake, "unicorn", "--mode", "meaning")
+    assert code == 2 and "cannot embed the query" in err  # meaning alone cannot fall back
+    code, _, err = cli_search(conn, monkeypatch, capsys, fake, "--mode", "hybrid")
+    assert code == 2 and "needs a query" in err
+    fake.queries.clear()
+    code, _, err = cli_search(conn, monkeypatch, capsys, fake, "unicorn", "--canton", "XX")
+    assert code == 2 and fake.queries == []  # a bad filter is caught before the API call

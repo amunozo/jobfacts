@@ -9,9 +9,10 @@ office is, and the real seniority. Each fact points to the sentence in the
 posting that supports it, so any answer can be checked in seconds. When a
 posting does not state a fact, jobfacts stores "not stated" and never guesses.
 
-**Status (5 November 2026): Milestone 1 of 4, in progress.** The collector,
-the extraction and a command-line search work, and the author uses them for
-their own job search. It is a personal project, not a hosted service. See
+**Status (8 November 2026): Milestone 1 of 4 built (its last check, a week of
+daily runs, is under way); Milestone 2 started.** The collector, the
+extraction and a command-line search (full text plus search by meaning) work,
+and the author uses them for their own job search. It is a personal project, not a hosted service. See
 "Not built yet" below.
 
 ## Why
@@ -46,6 +47,12 @@ the first thing to check, and today that means reading every posting.
 - **Search.** `jobfacts search` combines PostgreSQL full-text search with
   filters (canton, remote from Switzerland, maximum German level, no
   fixed-term) and groups duplicate postings. See `docs/search.md`.
+- **Search by meaning (first step of Milestone 2).** Relevant postings are
+  embedded with Mistral `mistral-embed` (first 6,000 characters) into
+  pgvector. `jobfacts search` by default fuses the full-text ranking and the
+  similarity ranking with reciprocal rank fusion, keeping every filter; it
+  falls back to full text when the query cannot be embedded. `jobfacts daily`
+  embeds new and changed postings. See `docs/search.md`.
 - **Evaluation.** A local labelling web app, reference labels, and an
   accuracy report per field and per posting language (`docs/labelling.md`).
 - **Search recall check.** `jobfacts search-eval` replays past job
@@ -88,9 +95,24 @@ How to read it:
   about 87-99%; per language the intervals are wider still.
 - **Cost:** about $0.0005 per posting for extraction (Jev).
 
+## Which embedding model? (measured 8 November 2026)
+
+`jobfacts meaning-eval` replays the author's past applications as wanted jobs
+against the 2,504 relevant postings, with 14 search phrases fixed before any
+model was scored, and counts how many wanted jobs reach the top 20 of at least
+one phrase. Three models were compared: Mistral `mistral-embed` and OpenAI
+`text-embedding-3-small` (APIs) and Qwen3-Embedding-0.6B (open, run on a CPU).
+Mistral with 6,000 characters per posting placed the most wanted jobs, ahead
+of full-text search and the other two models; with only the first 800
+characters its lead was much smaller. The sample is small (44 jobs), so the
+ranking between models is an indication, not a decisive result. Embedding the
+pool costs about $0.17 with Mistral at 6,000 characters; the local model was
+free but took 55 minutes for 800 characters per posting, so it was not run on
+longer texts.
+
 ## Not built yet
 
-- Search by meaning (embeddings), an HTTP API and a web page (Milestone 2).
+- An HTTP API and a web page (Milestone 2).
 - Deployment, a scheduled daily run, monitoring, and an accuracy gate in CI
   (Milestone 2; the labels are private, so the gate needs a private runner or
   stored results).

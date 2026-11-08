@@ -2,10 +2,11 @@
 
 import argparse
 import sys
+from dataclasses import replace
 from datetime import date
 from pathlib import Path
 
-from jobfacts import db
+from jobfacts import db, embed
 from jobfacts.collect.run import collect
 
 
@@ -34,7 +35,43 @@ def _search(conn, args) -> int:
         seniority=_csv(args.seniority),
         new_days=args.new_days,
         limit=args.limit,
+        mode="words",
+        model=embed.model_id(args.model),
     )
+    try:
+        filters.validate()  # before any API call
+    except search.SearchError as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 2
+    explicit = args.mode is not None
+    mode = args.mode or "hybrid"
+    query_vector = None
+    if mode != "words" and not args.query.strip():
+        if explicit:
+            print(f"error: --mode {mode} needs a query", file=sys.stderr)
+            return 2
+        mode = "words"  # the default mode with no query is the plain filter list
+    if mode != "words":
+        try:
+            query_vector = embed.make_embedder(args.model).embed_query(args.query)
+        except Exception as error:  # no API key, missing optional group, network or API error
+            if mode == "meaning":
+                print(f"error: cannot embed the query: {error!r}", file=sys.stderr)
+                return 2
+            print(
+                f"warning: cannot embed the query ({error!r}); searching by words only",
+                file=sys.stderr,
+            )
+            mode = "words"
+    filters = replace(filters, mode=mode)
+    if mode != "words":
+        missing = search.stale_embedding_count(conn, filters.model)
+        if missing:
+            print(
+                f"warning: {missing} pool postings have no current {args.model} vector (new, "
+                f"changed or not embedded); run `jobfacts embed --model {args.model}`",
+                file=sys.stderr,
+            )
     stale = search.stale_relevance_count(conn)
     if stale:
         print(
@@ -42,7 +79,9 @@ def _search(conn, args) -> int:
             file=sys.stderr,
         )
     try:
-        hits, total = search.search(conn, filters, evidence=args.evidence)
+        hits, total = search.search(
+            conn, filters, evidence=args.evidence, query_vector=query_vector
+        )
     except search.SearchError as error:
         print(f"error: {error}", file=sys.stderr)
         return 2
@@ -151,7 +190,7 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("migrate", help="apply database migrations")
     day = sub.add_parser(
-        "daily", help="database up, migrate, collect, relevance, Jev extraction for search"
+        "daily", help="database up, migrate, collect, relevance, Jev extraction, embeddings"
     )
     day.add_argument("--skip-collect", action="store_true", help="skip the collect step")
     col = sub.add_parser("collect", help="read all employer boards and store postings")
@@ -195,6 +234,18 @@ def main(argv: list[str] | None = None) -> int:
     sea.add_argument("--seniority", help="comma-separated, e.g. junior,mid")
     sea.add_argument("--new-days", type=int, help="first seen in the last N days")
     sea.add_argument("--limit", type=int, default=20)
+    sea.add_argument(
+        "--mode",
+        choices=["words", "meaning", "hybrid"],
+        help="hybrid (default: full-text and embeddings fused with RRF; words only if the "
+        "query cannot be embedded), words = full-text only, meaning = embeddings only",
+    )
+    sea.add_argument(
+        "--model",
+        choices=sorted(embed.MODEL_IDS),
+        default=embed.DEFAULT_MODEL,
+        help="embedding model for meaning and hybrid (default %(default)s)",
+    )
     sea.add_argument("--evidence", action="store_true", help="print supporting sentences")
     sea.add_argument("--json", action="store_true", help="print JSON for other programs")
     see = sub.add_parser(
@@ -204,6 +255,24 @@ def main(argv: list[str] | None = None) -> int:
     see.add_argument("--dates", type=Path, required=True, help="JSON: folder key -> YYYY-MM-DD")
     see.add_argument("--since", type=date.fromisoformat, help="only applications from YYYY-MM-DD")
     see.add_argument("--out", type=Path, help="report path (default data/private/reports)")
+    emb = sub.add_parser("embed", help="embed the posting pool for search by meaning")
+    emb.add_argument("--model", choices=sorted(embed.MODEL_IDS), required=True)
+    emb.add_argument("--limit", type=int, help="only this many postings (for timing)")
+    emb.add_argument(
+        "--char-budget",
+        type=int,
+        help="characters embedded per posting (default per model: "
+        + ", ".join(f"{m} {n}" for m, n in embed.CHAR_BUDGETS.items())
+        + ")",
+    )
+    men = sub.add_parser(
+        "meaning-eval", help="which embedding model finds the jobs the owner applied to?"
+    )
+    men.add_argument("--phrases", type=Path, required=True, help="one query per line, # comments")
+    men.add_argument("--applications", type=Path, required=True, help="folder of applications")
+    men.add_argument("--dates", type=Path, required=True, help="JSON: folder key -> YYYY-MM-DD")
+    men.add_argument("--models", default=",".join(embed.MODEL_IDS), help="comma-separated aliases")
+    men.add_argument("--out", type=Path, help="report path (default data/private/reports)")
     imp = sub.add_parser("import-applications", help="import application job descriptions")
     imp.add_argument("path", type=Path)
     sub.add_parser("select-test-set", help="write data/private/test_set.jsonl")
@@ -289,6 +358,47 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"error: {e}", file=sys.stderr)
                 return 2
             print(result.summary)
+            print(f"\nreport: {result.path}")
+            return 0
+        if args.command == "embed":
+            try:
+                embedder = embed.make_embedder(args.model)
+                summary = embed.run_embed(
+                    conn,
+                    embedder,
+                    limit=args.limit,
+                    budget=args.char_budget,
+                    progress=embed.print_progress,
+                )
+            except embed.CostError as error:
+                print(f"refusing to start: {error}", file=sys.stderr)
+                return 2
+            except (RuntimeError, KeyError) as error:  # missing optional group or API key
+                print(f"error: {error!r}", file=sys.stderr)
+                return 2
+            print(
+                f"{summary.model} at {summary.budget} characters: embedded {summary.embedded}, "
+                f"unchanged {summary.skipped}, "
+                f"tokens {summary.tokens}, cost ${summary.cost:.4f}, {summary.seconds:.0f}s "
+                f"(pool {embed.pool_size(conn)})"
+            )
+            return 0
+        if args.command == "meaning-eval":
+            from jobfacts import meaning_eval
+
+            models = _csv(args.models)
+            unknown = [m for m in models if m not in embed.MODEL_IDS]
+            if unknown:
+                print(f"error: unknown models {unknown}", file=sys.stderr)
+                return 2
+            try:
+                result = meaning_eval.run(
+                    conn, args.phrases, args.applications, args.dates, models, args.out
+                )
+            except (OSError, ValueError, RuntimeError, KeyError) as e:
+                print(f"error: {e!r}", file=sys.stderr)
+                return 2
+            print(result.report)
             print(f"\nreport: {result.path}")
             return 0
         if args.command == "import-applications":

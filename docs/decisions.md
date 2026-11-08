@@ -525,3 +525,66 @@ Newest at the bottom.
   veto (FR, GE, AG, SG, BE, LU ... are canton codes too).
 - **Also:** Workday titles and places are HTML-decoded (`R&amp;I` -> `R&I`);
   `scripts/repair_html_entities.py` repaired 90 stored rows.
+
+## 2026-11-08: Search by meaning: pgvector, three models compared, hybrid with RRF
+- **What:** postings get an embedding (a vector of numbers whose direction
+  stands for the meaning of the text) stored in PostgreSQL with pgvector
+  (`posting_embeddings`, one row per posting and model, with a hash of the
+  embedded text so a changed posting is embedded again). `jobfacts search
+  --mode words|meaning|hybrid`: meaning ranks by cosine similarity; hybrid
+  fuses the full-text list and the meaning list with reciprocal rank fusion
+  (RRF: a posting scores the sum of 1 / (60 + position) over the lists it
+  appears in; best 200 of each list). `jobfacts meaning-eval` replays the owner's past
+  applications as wanted jobs and scores `words`, `meaning:<model>` and
+  `hybrid:<model>` for Mistral `mistral-embed`, OpenAI
+  `text-embedding-3-small` and `Qwen3-Embedding-0.6B` (local, CPU).
+- **Why:** full-text search needs the query's exact words, so a phrase like
+  "evaluation engineer for LLMs" misses "Research Engineer (Evals)". The
+  three models cover a cheap API, the big-provider API and a free local
+  model; on a tie Mistral is preferred. RRF needs only positions, so a text
+  rank and a similarity need no common scale, and it keeps the exact-word
+  hits that meaning search can bury. Postgres already holds the data, so
+  filters (canton, German level, ...) apply inside the same SQL.
+- **Character budget:** the comparison first ran at 800 characters of title
+  + description for all three models. Qwen on this CPU ran 50-120 tokens a
+  second (the whole pool took 55 minutes at 800 characters); the 6000
+  characters first planned would have taken about 7 hours, so the budget was
+  lowered for all three to keep that first comparison fair. It tests only
+  the first paragraph: a model that profits from long texts was not tested.
+  The API models cost cents, so they now embed 6000 characters and Qwen
+  stays at 800 (`embed.CHAR_BUDGETS`; `--char-budget` overrides). Each stored
+  vector records the budget it used, and `meaning-eval` prints the budgets and
+  warns about mixed ones. Rerun at the per-model budgets (44 wanted jobs, 27
+  within scope): share of wanted jobs in the top 20 of at least one phrase,
+  full text 34%, hybrid Mistral 59% (Wilson 95% 44-72%), meaning Mistral 57%,
+  hybrid OpenAI 48%, meaning OpenAI 39%, Qwen (800) 30-32%; within the top 50,
+  hybrid Mistral 80% vs full text 48%. Mistral gained most from the longer
+  text (hybrid 48% -> 59% at top 20).
+- **Model chosen: Mistral `mistral-embed`, hybrid search by default** (agent,
+  8 Nov 2026, under the owner's rule "on a tie, Mistral"): best point
+  estimate at both budgets; intervals overlap with OpenAI, and the tie rule
+  points to Mistral anyway. Hybrid rather than meaning only: equal or better
+  recall at 20 and it keeps exact-word hits (company names, tools).
+- **No HNSW index for now:** 2,504 vectors are scanned exactly in
+  milliseconds, and an approximate index combined with the search filters
+  can silently drop matching postings (the index returns its nearest
+  candidates first, the filters remove some, fewer results come back). An
+  index is added only if the Milestone 2 load test shows the vector scan as
+  the bottleneck.
+- **Stale vectors, default mode:** each vector also records the posting's
+  `content_hash`; a pool posting with no vector or an older hash is "stale",
+  and `jobfacts search` warns about it. `jobfacts daily` embeds new and
+  changed postings with the default model (Mistral; it only warns if the key
+  or API fails). `jobfacts search` now defaults to `hybrid` with Mistral and
+  falls back to `words` with a warning when the query cannot be embedded, so
+  tools that call `jobfacts search --json` keep working offline.
+- **Rejected:** a typed vector column and an HNSW index now (dimensions
+  differ by model: 1024, 1536; the pool is 2,504 postings, so an exact scan
+  is fast; see "No HNSW index for now" above); dropping the local
+  model for speed (it is the free option, which is the point of testing it);
+  fusing by adding raw scores (text rank and cosine similarity are on
+  different scales); filtering in meaning mode by a similarity cut-off (no
+  principled value; the ranking is the product).
+- **Result:** see `data/private/reports/meaning_eval_2026-11-08.md` (800
+  characters) and `meaning_eval_2026-11-08_long.md` (per-model budgets);
+  private, they name postings. Summary in `docs/search.md`.

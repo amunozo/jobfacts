@@ -29,6 +29,17 @@ packages = ["src/jobfacts"]
 
 [dependency-groups]
 dev = ["pytest>=8", "ruff>=0.6"]
+# Local embedding model (Qwen3-Embedding on CPU). Not needed by the server or CI:
+# `uv run --group embed-local jobfacts embed --model qwen`.
+embed-local = ["sentence-transformers>=3", "torch"]
+
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
 
 [tool.ruff]
 line-length = 100

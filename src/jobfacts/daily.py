@@ -1,4 +1,4 @@
-"""`jobfacts daily`: database up, migrate, collect, relevance, Jev extraction for search."""
+"""`jobfacts daily`: database up, migrate, collect, relevance, Jev extraction, embeddings."""
 
 import subprocess
 import time
@@ -7,7 +7,7 @@ from pathlib import Path
 
 import psycopg
 
-from jobfacts import db
+from jobfacts import db, embed
 from jobfacts.collect.run import collect
 
 REPO_ROOT = (
@@ -105,6 +105,26 @@ def _extract(conn, totals: dict) -> None:
     )
 
 
+def _embed(conn, totals: dict) -> None:
+    """Embed new and changed pool postings for the default model. Never fails the daily run:
+    a missing key, a network or API error or the cost guard only prints a warning (the
+    vectors made before the error stay; the next run continues)."""
+    totals.setdefault("embedded", 0)
+    try:
+        embedder = embed.make_embedder(embed.DEFAULT_MODEL)
+        summary = embed.run_embed(conn, embedder)
+    except Exception as error:
+        conn.rollback()
+        print(f"warning: embedding skipped ({type(error).__name__}: {error})")
+        return
+    print(
+        f"{summary.model} at {summary.budget} characters: embedded {summary.embedded}, "
+        f"unchanged {summary.skipped}, tokens {summary.tokens}, cost ${summary.cost:.4f}"
+    )
+    totals["embedded"] = summary.embedded
+    totals["cost"] = totals.get("cost", 0.0) + summary.cost
+
+
 def open_postings(conn) -> int:
     row = conn.execute(
         "SELECT count(*) FROM postings WHERE closed_at IS NULL AND origin = 'board'"
@@ -121,7 +141,7 @@ def run_daily(skip_collect: bool = False) -> int:
             steps = [("migrate", _migrate)]
             if not skip_collect:
                 steps.append(("collect", _collect))
-            steps += [("relevance", _relevance), ("extract", _extract)]
+            steps += [("relevance", _relevance), ("extract", _extract), ("embed", _embed)]
             for name, step in steps:
                 print(f"== {name}")
                 try:
@@ -139,6 +159,7 @@ def run_daily(skip_collect: bool = False) -> int:
     print(
         f"daily: {totals['open']} open postings{new}, "
         f"{totals['relevant']} relevant newly scored, {totals['extracted']} extracted, "
+        f"{totals['embedded']} embedded, "
         f"{totals['errors']} errors, ${totals['cost']:.3f}"
     )
     return 0

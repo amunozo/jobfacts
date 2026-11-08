@@ -4,12 +4,13 @@ Only open board postings that the relevance filter kept are searched, using each
 latest successful Jev extraction. Filter semantics are written down in docs/search.md.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 import psycopg
 
-from jobfacts import locations
+from jobfacts import embed, locations
 from jobfacts import sentences as splitter
+from jobfacts.embed import vector_literal
 from jobfacts.extract import jev
 from jobfacts.extract.spec import FIELDS, LOCATION_ID, SENIORITY_VALUES, TITLE_ID
 from jobfacts.grouping import group_rows
@@ -25,6 +26,9 @@ UNCLEAR_LEVEL = "required_level_not_stated"
 REMOTE_ALLOWED = ["allowed"]
 REMOTE_UNCLEAR = ["allowed", "unclear", "not_stated"]
 WORK_MODES = [v for v in FIELDS["work_mode"].values if v != "not_stated"]
+MODES = ["words", "meaning", "hybrid"]
+TOP_PER_LIST = 200  # hybrid: each list contributes its best 200 postings to the fusion
+RRF_K = 60
 EVIDENCE_FIELDS = [
     "office_cantons",
     "work_mode",
@@ -55,8 +59,16 @@ class Filters:
     seniority: list[str] = field(default_factory=list)
     new_days: int | None = None
     limit: int = 20
+    mode: str = "words"  # words | meaning | hybrid
+    model: str = ""  # embedding model id (posting_embeddings.model), for meaning and hybrid
 
     def validate(self) -> None:
+        if self.mode not in MODES:
+            raise SearchError(f"unknown mode {self.mode!r}; allowed: {MODES}")
+        if self.mode != "words" and not self.query.strip():
+            raise SearchError(f"--mode {self.mode} needs a query")
+        if self.mode != "words" and not self.model:
+            raise SearchError(f"--mode {self.mode} needs --model")
         allowed_cantons = set(locations.office_canton_values())
         for c in self.cantons:
             if c not in allowed_cantons:
@@ -103,6 +115,17 @@ def stale_relevance_count(conn) -> int:
     ).fetchone()[0]
 
 
+def stale_embedding_count(conn, model: str) -> int:
+    """Pool postings (`embed.POOL_FROM`) with no vector for the embedding model id `model`, or
+    whose vector was made from an older version of the posting (content hash differs)."""
+    return conn.execute(
+        f"SELECT count(*) {embed.POOL_FROM} LEFT JOIN posting_embeddings e "
+        "ON e.posting_id = p.id AND e.model = %(model)s "
+        f"{embed.POOL_WHERE} AND (e.posting_id IS NULL OR e.content_hash <> p.content_hash)",
+        {**embed.pool_params(), "model": model},
+    ).fetchone()[0]
+
+
 def _language_values(maximum: str, show_unclear: bool) -> list[str]:
     values = list(LANGUAGE_MAX[maximum])
     if show_unclear or maximum == "fluent":
@@ -110,13 +133,23 @@ def _language_values(maximum: str, show_unclear: bool) -> list[str]:
     return values
 
 
-def build(f: Filters) -> tuple[str, dict]:
+def build(
+    f: Filters, query_vector: list[float] | None = None, top: int | None = None
+) -> tuple[str, dict]:
     """Return (SQL, parameters) for all matching postings, in result order.
 
-    Pure: no database access. There is no LIMIT: `search` groups duplicates first and then
-    applies the limit to the groups.
+    Pure: no database access. Mode `words` ranks by full-text rank and keeps only postings that
+    match the query words; mode `meaning` needs the query's embedding (`query_vector`) and ranks
+    the postings that have a stored vector for `f.model` by cosine similarity. Every filter
+    applies in both. `top` adds a LIMIT (hybrid takes the best 200 of each list). Without it
+    there is no LIMIT: `search` groups duplicates first and then applies the limit to the groups.
+    Hybrid is built by `search` from one query of each mode.
     """
     f.validate()
+    if f.mode == "hybrid":
+        raise SearchError("hybrid is the fusion of a words and a meaning query; use search()")
+    if f.mode == "meaning" and query_vector is None:
+        raise SearchError("meaning search needs the query vector")
     params: dict = {"rel_model": jev.MODEL}
     where = ["p.closed_at IS NULL", "p.origin = 'board'"]
 
@@ -148,7 +181,14 @@ def build(f: Filters) -> tuple[str, dict]:
         params["new_days"] = f.new_days
 
     rank = "0::real"
-    if f.query.strip():
+    join = ""
+    if f.mode == "meaning":
+        join = " JOIN posting_embeddings emb ON emb.posting_id = p.id AND emb.model = %(emb_model)s"
+        rank = "1 - (emb.embedding <=> %(qvec)s::vector)"
+        params["emb_model"] = f.model
+        params["qvec"] = vector_literal(query_vector)
+        order = "rank DESC, p.first_seen_at DESC, p.id"
+    elif f.query.strip():
         where.append("p.search_tsv @@ websearch_to_tsquery('simple', %(query)s)")
         rank = "ts_rank(p.search_tsv, websearch_to_tsquery('simple', %(query)s))"
         params["query"] = f.query
@@ -162,7 +202,10 @@ def build(f: Filters) -> tuple[str, dict]:
         "x.work_mode, x.remote_from_switzerland, x.german, x.french, x.seniority, x.contract_type, "
         f"p.location_raw, {rank} AS rank"
     )
-    sql = f"SELECT {columns} {_BASE} WHERE {' AND '.join(where)} ORDER BY {order}"
+    sql = f"SELECT {columns} {_BASE}{join} WHERE {' AND '.join(where)} ORDER BY {order}"
+    if top is not None:
+        sql += " LIMIT %(top)s"
+        params["top"] = top
     return sql, params
 
 
@@ -245,15 +288,48 @@ def _rows(conn: psycopg.Connection, sql: str, params: dict) -> list[dict]:
     return [dict(zip(names, values, strict=True)) for values in cur.fetchall()]
 
 
-def search(conn: psycopg.Connection, f: Filters, evidence: bool = False) -> tuple[list[Hit], int]:
+def rrf(rankings: list[list[int]], k: int = RRF_K) -> list[tuple[int, float]]:
+    """Reciprocal rank fusion: each list gives an id 1 / (k + position), position from 1; the
+    scores add up. Returns (id, score) best first, ties by id."""
+    scores: dict[int, float] = {}
+    for ranking in rankings:
+        for position, item in enumerate(ranking, 1):
+            scores[item] = scores.get(item, 0.0) + 1.0 / (k + position)
+    return sorted(scores.items(), key=lambda pair: (-pair[1], pair[0]))
+
+
+def _hybrid_rows(conn: psycopg.Connection, f: Filters, query_vector: list[float]) -> list[dict]:
+    """Fuse the best 200 postings of the words list and of the meaning list (same filters)."""
+    lists = [
+        _rows(conn, *build(replace(f, mode="words"), top=TOP_PER_LIST)),
+        _rows(conn, *build(replace(f, mode="meaning"), query_vector, top=TOP_PER_LIST)),
+    ]
+    by_id = {row["id"]: row for rows in lists for row in rows}
+    fused = rrf([[row["id"] for row in rows] for rows in lists])
+    return [{**by_id[i], "rank": score} for i, score in fused]
+
+
+def search(
+    conn: psycopg.Connection,
+    f: Filters,
+    evidence: bool = False,
+    query_vector: list[float] | None = None,
+) -> tuple[list[Hit], int]:
     """Run the search. Returns (hits, total number of matching jobs before the limit).
 
     Postings of the same employer with the same normalised title are one job (see
     `grouping`): the best-ranked matching posting is shown and the others are its
-    `duplicates`. The total and the limit count jobs, not postings.
+    `duplicates`. The total and the limit count jobs, not postings. Modes `meaning` and
+    `hybrid` need `query_vector`, the embedding of the query made with model `f.model`.
     """
-    sql, params = build(f)
-    groups = group_rows(_rows(conn, sql, params))
+    f.validate()
+    if f.mode != "words" and query_vector is None:
+        raise SearchError(f"--mode {f.mode} needs the query vector")
+    if f.mode == "hybrid":
+        rows = _hybrid_rows(conn, f, query_vector)
+    else:
+        rows = _rows(conn, *build(f, query_vector))
+    groups = group_rows(rows)
     shown = groups[: f.limit]
     evidence_by_id: dict[int, dict] = {}
     if evidence and shown:  # sentences are split only for the jobs that are shown
