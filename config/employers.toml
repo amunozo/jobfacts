@@ -748,6 +748,17 @@ site = "datasite"
 # Swiss Life (swisslife / wd3 / Swiss_Life_Career_Site) left out: its robots.txt disallows the sitemap (checked 2026-11-02).
 
 [[employer]]
+name = "Richemont"
+ats = "workday"
+board_id = "richemont"
+wd = "wd3"
+site = "broadbean_external"
+# robots.txt disallows /richemont/ and lists only the broadbean_external sitemap (503 URLs, 2026-11-06),
+# which holds part of the jobs: some Swiss postings on /richemont/ are missing from it.
+
+# Caterpillar (cat / wd5 / CaterpillarCareers) left out: its robots.txt disallows /CaterpillarCareers/ (checked 2026-11-06).
+
+[[employer]]
 name = "CircuitHub"
 ats = "ashby"
 board_id = "circuithub"
@@ -806,3 +817,9 @@ name = "BJAK"
 ats = "ashby"
 board_id = "bjakcareer"
 country = "CH"
+
+[[employer]]
+name = "grape insurance"
+ats = "lever"
+board_id = "grape-health"
+eu = true
