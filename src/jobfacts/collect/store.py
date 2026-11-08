@@ -8,6 +8,7 @@ from pathlib import Path
 import psycopg
 
 from jobfacts.collect.posting import Posting
+from jobfacts.text import unescape_field
 
 EMPLOYERS_FILE = Path(__file__).resolve().parents[3] / "config" / "employers.toml"
 
@@ -232,3 +233,34 @@ def record_success(
         )
     conn.commit()  # durable now, not at the end of the run (see rekey_source_ids)
     return counts
+
+
+def repair_html_entities(conn: psycopg.Connection, ats: str = "workday") -> int:
+    """Decode HTML entities in the stored titles and places of one job system ("R&amp;I" ->
+    "R&I") and recompute the content hash the way the collector does. Idempotent: a second
+    run changes nothing. Returns the number of postings changed.
+
+    Workday pages are read again only when the sitemap entry changes, so postings stored
+    before the collector decoded entities would keep the escaped text. The new hash makes
+    the next `jobfacts daily` extract these postings again (the relevance score is keyed by
+    posting and version, not by hash, so it is not repeated).
+    """
+    rows = conn.execute(
+        "SELECT p.id, p.url, p.title, p.location_raw, p.description_text "
+        "FROM postings p JOIN employers e ON e.id = p.employer_id WHERE e.ats = %s",
+        (ats,),
+    ).fetchall()
+    changed = 0
+    with conn.transaction():
+        for post_id, url, title, place, text in rows:
+            new_title, new_place = unescape_field(title), unescape_field(place)
+            if (new_title, new_place) == (title, place):
+                continue
+            new_hash = Posting("", url, new_title, new_place, text).content_hash
+            conn.execute(
+                "UPDATE postings SET title = %s, location_raw = %s, content_hash = %s "
+                "WHERE id = %s",
+                (new_title, new_place, new_hash, post_id),
+            )
+            changed += 1
+    return changed

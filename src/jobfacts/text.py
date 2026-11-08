@@ -44,3 +44,15 @@ def html_to_text(value: str | None) -> str:
     lines = [re.sub(r"[ \t]+", " ", line).strip() for line in text.split("\n")]
     text = "\n".join(lines)
     return re.sub(r"\n{3,}", "\n\n", text).strip()
+
+
+def unescape_field(value: str | None) -> str:
+    """A one-line field (title, place) with HTML entities decoded, also when escaped twice
+    ("R&amp;amp;I"), non-breaking spaces turned into spaces and whitespace collapsed."""
+    text = value or ""
+    for _ in range(3):  # stops at the first pass that changes nothing
+        decoded = html.unescape(text)
+        if decoded == text:
+            break
+        text = decoded
+    return re.sub(r"\s+", " ", text).strip()

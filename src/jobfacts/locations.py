@@ -30,6 +30,11 @@ Matching rules
   (`location_field=True`) no capital letter or cue is needed.
 - Exclusions for known false friends: Baden-Württemberg / Baden-Baden, Freiburg im
   Breisgau, "New Bern", "Basel III", and any name followed by ", Germany" and similar.
+- Location field, foreign places: the string is split into places ("A / B", "A; B", "A | B");
+  a place that names a foreign country (English, German, French or Italian name, or a
+  two-letter ISO code as the last part: "Berlin, DE") and not Switzerland is ignored even if
+  a word of it is a Swiss place ("Monte Carlo, Monaco"). ISO codes that are also canton codes
+  never veto. One Swiss place keeps the whole string Swiss ("Zurich, Switzerland / Paris, France").
 - Canton codes ("ZH") count only in a location field, upper-case, and only next to another
   Swiss signal ("Paris, FR" is not Switzerland). "Swiss" is never a place.
 """
@@ -76,6 +81,10 @@ _EXCLUDE: dict[str, tuple[str | None, str | None]] = {
 _TOKEN = re.compile(r"[^\W_]+")
 _GAP = re.compile(r"[\s\-./'’]{1,3}")
 _COUNTRY_CODE = re.compile(r"(?<![^\W_])[A-Z]{2,3}(?![^\W_])")
+# Places of a multi-place location field: "A / B" (Workday, Lever, Ashby ...), "A; B" (Greenhouse),
+# "A | B". A slash without spaces ("Biel/Bienne") is part of a name.
+_SEGMENT_SEP = re.compile(r"[;|\n]|\s+/\s+")
+_CODE_PART = re.compile(r"\s*\(?([A-Z]{2})\)?\s*")
 
 
 def _norm_char(ch: str) -> str:
@@ -148,6 +157,8 @@ class _Index:
     places: dict[str, Place]
     countries: re.Pattern
     country_codes: set[str]
+    foreign: re.Pattern
+    foreign_codes: frozenset[str]
     cantons: dict[str, Canton]
 
 
@@ -277,12 +288,23 @@ def _load() -> _Index:
     countries = re.compile(
         r"(?<![^\W_])(?:" + "|".join(re.escape(c) for c in country_words) + r")(?![^\W_])"
     )
+    foreign_words = sorted(
+        {tuple(_tokens(c)) for c in data["foreign_countries"]}, key=lambda t: (-len(t), t)
+    )
+    foreign = re.compile(
+        r"(?<![^\W_])(?:"
+        + "|".join(r"[\s\-./'’]{1,3}".join(re.escape(w) for w in words) for words in foreign_words)
+        + r")(?![^\W_])"
+    )
+    foreign_codes = frozenset(data["foreign_country_codes"]) - set(cantons) - {"CH"}
     return _Index(
         names,
         max(len(k) for k in names),
         places,
         countries,
         set(data["country_codes"]),
+        foreign,
+        foreign_codes,
         cantons,
     )
 
@@ -310,6 +332,58 @@ def place_by_key(key: str) -> Place | None:
 
 
 # ----- scanning ---------------------------------------------------------------------------
+
+
+def _is_foreign(segment: str) -> bool:
+    """True if one place of a location field names a foreign country and not Switzerland.
+
+    The comma-separated parts of the place are checked: the country is a part of its own
+    ("Paris, France"). Some boards also join several cities with commas ("Geneva, London,
+    Singapore"), where "Singapore" is a city: a part that is entirely a Swiss place and does
+    not stand right before the country part keeps the place Swiss.
+    """
+    index = _load()
+    norm = normalize(segment)
+    if index.countries.search(norm) or any(
+        m.group() in index.country_codes for m in _COUNTRY_CODE.finditer(segment)
+    ):
+        return False
+    spans: list[tuple[int, int]] = []
+    pos = 0
+    for part in segment.split(","):
+        spans.append((pos, pos + len(part)))
+        pos += len(part) + 1
+    foreign = set()
+    for i, (a, b) in enumerate(spans):
+        code = _CODE_PART.fullmatch(segment[a:b]) if i == len(spans) - 1 and i > 0 else None
+        if index.foreign.search(norm[a:b]) or (code and code.group(1) in index.foreign_codes):
+            foreign.add(i)
+    if not foreign:
+        return False
+    for hit in _scan(segment, True):
+        if hit.end - hit.start == 2 and segment[hit.start : hit.end].isupper():
+            continue  # "AU", "LU": a country or canton code, not a city
+        for i, (a, b) in enumerate(spans):
+            if a <= hit.start and hit.end <= b and i not in foreign:
+                alone = not segment[a : hit.start].strip() and not segment[hit.end : b].strip()
+                if alone and i + 1 not in foreign:
+                    return False
+    return True
+
+
+def _swiss_part(text: str) -> str:
+    """`text` with the places that name a foreign country blanked out (same length, so
+    offsets stay valid). "Zurich, Switzerland / Paris, France" keeps only the Zurich place."""
+    out: list[str] = []
+    pos = 0
+    for sep in [*_SEGMENT_SEP.finditer(text), None]:
+        end = sep.start() if sep else len(text)
+        segment = text[pos:end]
+        out.append(" " * len(segment) if _is_foreign(segment) else segment)
+        if sep:
+            out.append(sep.group())
+            pos = sep.end()
+    return "".join(out)
 
 
 def _has_cue(norm: str, start: int, end: int) -> bool:
@@ -383,7 +457,8 @@ def find_places(
     if not wanted:
         return []
     out: list[PlaceMatch] = []
-    for hit in _scan(text, location_field):
+    scanned = _swiss_part(text) if location_field else text
+    for hit in _scan(scanned, location_field):
         for c in wanted:
             p = hit.name.places.get(c)
             if p:
@@ -417,8 +492,12 @@ def canton_hints(text: str, *, location_field: bool = False) -> list[str]:
 
     Order of first appearance. A name that exists in several cantons ("Pfäffikon", "Buchs")
     suggests all of them. In a location field a two-letter canton code ("SG") counts when
-    another Swiss signal (a place, a canton name, "Switzerland", "CH") is present.
+    another Swiss signal (a place, a canton name, "Switzerland", "CH") is present, and a place
+    of a multi-place string ("A / B", "A; B", "A | B") that names a foreign country and not
+    Switzerland is ignored ("Chateauneuf sur Isere, France").
     """
+    if location_field:
+        text = _swiss_part(text)
     hits = _scan(text, location_field)
     found: list[str] = []
     for h in hits:
@@ -435,7 +514,13 @@ def canton_hints(text: str, *, location_field: bool = False) -> list[str]:
 
 
 def mentions_switzerland(text: str, *, location_field: bool = False) -> bool:
-    """True if `text` names a Swiss place, a canton, or the country."""
+    """True if `text` names a Swiss place, a canton, or the country.
+
+    In a location field, a place that names a foreign country (and not Switzerland) does not
+    count, even if part of its name is a Swiss place: "Chateauneuf sur Isere, France".
+    """
+    if location_field:
+        text = _swiss_part(text)
     return bool(canton_hints(text, location_field=location_field)) or _country_signal(
         text, location_field
     )

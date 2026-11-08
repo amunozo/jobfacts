@@ -128,6 +128,16 @@ def test_parse_posting_maps_fields():
     assert p.posted_at.year == 2026
 
 
+def test_parse_posting_decodes_entities_in_title_and_place():
+    html = page(title="Research &amp; Innovation (R&amp;I)&nbsp;Lead", locality="Bern &amp; Co")
+    p = workday.parse_posting(html, u("Bern", "Role_R-1"))
+    assert p.title == "Research & Innovation (R&I) Lead"
+    assert p.location_raw == "Bern & Co, Switzerland"
+    twice = workday.parse_posting(page(title="Project &amp;amp; Facility"), u("Bern", "Role_R-1"))
+    assert twice.title == "Project & Facility"
+    assert workday.parse_posting(page(title="A &lt; B"), u("Bern", "Role_R-1")).title == "A < B"
+
+
 def test_parse_posting_remote_and_workday_code_locality():
     html = page(locality="Wor-Ati6", telecommute=True)
     p = workday.parse_posting(html, u("Zurich", "Role_R-2"))

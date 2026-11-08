@@ -202,3 +202,105 @@ def test_small_postal_spillover_into_another_canton_is_ignored():
     from jobfacts.locations import canton_hints
 
     assert canton_hints("St. Gallen", location_field=True) == ["SG"]
+
+
+# --- foreign places in a location field ---------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "MONTE CARLO, Monaco",  # "Monte" is a register name
+        "CHATEAUNEUF SUR ISERE, France",  # a Châteauneuf exists in Valais
+        "12 Rue de la Gare, 75001 Paris, France",  # "Rue" is a register name
+        "Zug, Germany",  # a Swiss name directly before a foreign country
+        "Sion, Frankreich",
+        "Châteauneuf, Francia",
+        "Châteauneuf, Italie",
+        "Lancy, Royaume-Uni",
+        "Aarau, United States of America",
+        "Field Sales (Canada), Canada",  # "Sales" is a register name
+        "Wil, Spain / Au, Poland",
+        "Bern, DE",  # an ISO code as the last part
+        "Bern, (US)",
+        "Sion, JP",
+    ],
+)
+def test_foreign_place_is_not_swiss(text):
+    assert not mentions_switzerland(text, location_field=True)
+    assert canton_hints(text, location_field=True) == []
+    assert not find_places(text, list(CANTONS), location_field=True)
+
+
+@pytest.mark.parametrize(
+    ("text", "cantons"),
+    [
+        ("Zurich, Switzerland / Paris, France", ["ZH"]),
+        ("Paris, France / Zurich, Switzerland", ["ZH"]),
+        ("Paris, France / Zürich", ["ZH"]),
+        ("Berlin, Germany; Zug", ["ZG"]),  # Greenhouse joins with ";"
+        ("Zug | Wien, Austria", ["ZG"]),
+        ("Genève, Suisse / Lyon, France", ["GE"]),
+        ("Lugano, Svizzera / Milano, Italia", ["TI"]),
+        ("Basel, Schweiz, Deutschland", ["BS"]),  # the same place names Switzerland and Germany
+        ("Geneva, London, Paris, Singapore", ["GE"]),  # a comma list where Singapore is a city
+        ("Singapore / Zug", ["ZG"]),
+        ("Biel/Bienne, Switzerland", ["BE"]),  # a slash without spaces is part of a name
+    ],
+)
+def test_one_swiss_place_keeps_a_multi_place_string_swiss(text, cantons):
+    assert mentions_switzerland(text, location_field=True)
+    assert canton_hints(text, location_field=True) == cantons
+
+
+def test_foreign_place_of_a_multi_place_string_gives_no_canton_or_place():
+    text = "Chateauneuf sur Isere, France / Zurich, Switzerland"
+    assert canton_hints(text, location_field=True) == ["ZH"]
+    assert not find_places(text, ["VS"], location_field=True)
+    assert place_keys(text, ["ZH"], location_field=True) == ["place:261:Zürich"]
+
+
+def test_canton_codes_never_veto_even_when_they_are_country_codes():
+    # FR = Fribourg or France, GE = Geneva or Georgia, AG = Aargau or Antigua, SG = St. Gallen
+    # or Singapore, TI = Ticino, NE = Neuchâtel or Niger, BE = Bern or Belgium, LU = Lucerne
+    for text, canton in [
+        ("Fribourg, FR", "FR"),
+        ("Geneva, GE", "GE"),
+        ("Aarau, AG", "AG"),
+        ("St. Gallen, SG", "SG"),
+        ("Lugano, TI", "TI"),
+        ("Neuchâtel, NE", "NE"),
+        ("Bern, BE", "BE"),
+        ("Luzern, LU", "LU"),
+    ]:
+        assert canton in canton_hints(text, location_field=True), text
+        assert mentions_switzerland(text, location_field=True), text
+
+
+def test_country_codes_veto_only_when_they_are_not_canton_codes():
+    assert mentions_switzerland("Zurich, CH", location_field=True)
+    assert not mentions_switzerland("Paris, FR", location_field=True)  # no Swiss place anyway
+    assert not mentions_switzerland("Tbilisi, GE", location_field=True)
+    for code in ("FR", "GE", "AG", "SG", "TI", "NE", "BE", "LU", "GR", "AR"):
+        assert code not in locations._load().foreign_codes
+    assert {"DE", "US", "IT", "IN", "AU"} <= locations._load().foreign_codes
+    # a two-letter register name written as a code is not a city that exempts the place
+    assert not mentions_switzerland("North Sydney, AU", location_field=True)
+
+
+def test_foreign_country_names_in_four_languages_and_no_register_clash():
+    index = locations._load()
+    for name in (
+        "Germany", "Deutschland", "Allemagne", "Germania", "Österreich", "Autriche", "Spagna",
+        "Royaume-Uni", "Vereinigtes Königreich", "États-Unis", "Stati Uniti", "UAE", "Israel",
+        "Singapore", "Mexiko", "Brésil", "Giappone", "India", "China", "Canada", "Australia",
+    ):  # fmt: skip
+        assert index.foreign.search(locations.normalize(name)), name
+    assert not index.foreign.search("switzerland")
+    for tokens in locations._tokens("Monaco"), locations._tokens("Luxembourg"):
+        assert tokens not in index.names  # no country name is also a Swiss place
+
+
+def test_free_text_is_unchanged_by_the_foreign_rule():
+    assert mentions_switzerland("Based in Zürich; offices in Paris, France")
+    assert canton_hints("Monte Carlo, Monaco") == []

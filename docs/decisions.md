@@ -509,3 +509,19 @@ Newest at the bottom.
   only office-place lists like the one above -> `unclear` (narrow, but the
   owner preferred no change).
 
+## 2026-11-08: A foreign country in a location field vetoes the place
+- **What:** `mentions_switzerland`, `canton_hints` and `find_places` (location
+  field only) ignore a place of a multi-place string ("A / B", "A; B", "A | B")
+  that names a foreign country and not Switzerland, even when a word of it is a
+  Swiss place ("Monte Carlo, Monaco", "Chateauneuf sur Isere, France"). One
+  Swiss place keeps the whole string Swiss. Country names come from
+  `config/swiss_locations.toml` (English, German, French, Italian); an ISO code
+  counts only as the last comma part and never when it is also a canton code.
+- **Why:** 46 stored postings (Workday 26, SmartRecruiters 20) were treated
+  as Swiss through a name clash; 8 were relevant, and the 7 already extracted
+  all said `outside_switzerland`, so no search result changed.
+- **Rejected:** vetoing on any foreign country word in the string (a Greenhouse
+  list "Geneva, London, Singapore" has Singapore as a city); letting ISO codes
+  veto (FR, GE, AG, SG, BE, LU ... are canton codes too).
+- **Also:** Workday titles and places are HTML-decoded (`R&amp;I` -> `R&I`);
+  `scripts/repair_html_entities.py` repaired 90 stored rows.

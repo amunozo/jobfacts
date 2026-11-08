@@ -30,7 +30,7 @@ import httpx
 from jobfacts.collect.http import USER_AGENT, _get
 from jobfacts.collect.posting import BoardRead, Posting, parse_time
 from jobfacts.locations import mentions_switzerland
-from jobfacts.text import html_to_text
+from jobfacts.text import html_to_text, unescape_field
 
 _NS = "{http://www.sitemaps.org/schemas/sitemap/0.9}"
 _REMOTE = re.compile(r"remote|home[\s-]?office|telecommut|anywhere|worldwide|virtual", re.I)
@@ -167,17 +167,16 @@ def _location(job: dict, url: str) -> str:
     for place in places:
         address = (place or {}).get("address") or {}
         if isinstance(address, str):
-            parts.append(address)
+            parts.append(unescape_field(address))
             continue
         country = address.get("addressCountry")
         country = country.get("name") if isinstance(country, dict) else country
-        locality = address.get("addressLocality") or ""
+        locality = unescape_field(address.get("addressLocality"))
         if not locality or any(ch.isdigit() for ch in locality):  # Workday codes like "Wor-Ati6"
             locality = url_location_text(url)
+        region = unescape_field(address.get("addressRegion"))
         parts.append(
-            ", ".join(
-                dict.fromkeys(filter(None, [locality, address.get("addressRegion"), country]))
-            )
+            ", ".join(dict.fromkeys(filter(None, [locality, region, unescape_field(country)])))
         )
     if not parts and url_location_text(url):
         parts.append(url_location_text(url))
@@ -196,7 +195,7 @@ def parse_posting(html_text: str, url: str, version: str | None = None) -> Posti
     return Posting(
         source_job_id=job_id_from_url(url) or str(identifier or ""),
         url=url,
-        title=(job.get("title") or "").strip(),
+        title=unescape_field(job.get("title")),
         location_raw=_location(job, url),
         description_text=html_to_text(job.get("description")),
         posted_at=parse_time(job.get("datePosted")),

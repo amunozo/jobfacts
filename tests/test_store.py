@@ -149,3 +149,29 @@ def test_rekey_is_committed(conn, employer):
     with second_connection(conn) as other:
         ids = other.execute("SELECT source_job_id FROM postings").fetchall()
     assert ids == [("r-1",)]
+
+
+def test_repair_html_entities_is_idempotent_and_limited_to_workday(conn):
+    wd = conn.execute(
+        "INSERT INTO employers (name, ats, board_id) VALUES ('Wd', 'workday', 'wd') RETURNING id"
+    ).fetchone()[0]
+    lever = conn.execute(
+        "INSERT INTO employers (name, ats, board_id) VALUES ('Lv', 'lever', 'lv') RETURNING id"
+    ).fetchone()[0]
+    dirty = Posting("w1", "https://example.test/w1", "Ops &amp; Data", "Zurich &amp; Bern", "Text")
+    clean = Posting("w2", "https://example.test/w2", "Plain title", "Zurich", "Text")
+    other = Posting("l1", "https://example.test/l1", "Ops &amp; Data", "Zurich", "Text")
+    read(conn, wd, [dirty, clean])
+    read(conn, lever, [other])
+    assert store.repair_html_entities(conn) == 1
+    assert store.repair_html_entities(conn) == 0
+    row = conn.execute(
+        "SELECT title, location_raw, content_hash FROM postings WHERE source_job_id = 'w1'"
+    ).fetchone()
+    assert row[:2] == ("Ops & Data", "Zurich & Bern")
+    # the hash is the one a fresh read of the decoded posting would store, so the collector
+    # sees no change when the page is read again
+    assert row[2] == Posting("w1", dirty.url, "Ops & Data", "Zurich & Bern", "Text").content_hash
+    assert conn.execute("SELECT title FROM postings WHERE source_job_id = 'l1'").fetchone() == (
+        "Ops &amp; Data",
+    )
