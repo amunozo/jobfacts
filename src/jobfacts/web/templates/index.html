@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>jobfacts</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="/">jobfacts</a>
+    <span class="tagline">The facts a job posting hides</span>
+  </div>
+</header>
+
+<main class="wrap">
+<form method="get" action="/" class="search">
+  <div class="field wide">
+    <label for="query">Search</label>
+    <input id="query" name="query" type="search" maxlength="500" value="{{ selected.query }}" placeholder="e.g. machine learning engineer">
+  </div>
+
+  <fieldset class="field wide">
+    <legend>Cantons</legend>
+    <div class="checks cantons">
+      {% for c in cantons %}
+      <label class="check"><input type="checkbox" name="canton" value="{{ c }}"{% if c in selected.cantons %} checked{% endif %}> {{ c|human if c == 'outside_switzerland' else c }}</label>
+      {% endfor %}
+    </div>
+    <label class="check"><input type="checkbox" name="remote" value="1"{% if selected.remote %} checked{% endif %}> Also remote jobs allowed from Switzerland</label>
+  </fieldset>
+
+  <div class="field">
+    <label for="german_max">German</label>
+    <select id="german_max" name="german_max">
+      {% for value, label in levels %}<option value="{{ value }}"{% if value == selected.german_max %} selected{% endif %}>{{ label }}</option>{% endfor %}
+    </select>
+  </div>
+  <div class="field">
+    <label for="french_max">French</label>
+    <select id="french_max" name="french_max">
+      {% for value, label in levels %}<option value="{{ value }}"{% if value == selected.french_max %} selected{% endif %}>{{ label }}</option>{% endfor %}
+    </select>
+  </div>
+
+  <fieldset class="field">
+    <legend>Work mode</legend>
+    <div class="checks">
+      {% for m in work_modes %}
+      <label class="check"><input type="checkbox" name="work_mode" value="{{ m }}"{% if m in selected.work_modes %} checked{% endif %}> {{ m }}</label>
+      {% endfor %}
+    </div>
+  </fieldset>
+  <fieldset class="field">
+    <legend>Seniority</legend>
+    <div class="checks">
+      {% for s in seniorities %}
+      <label class="check"><input type="checkbox" name="seniority" value="{{ s }}"{% if s in selected.seniority %} checked{% endif %}> {{ s|human }}</label>
+      {% endfor %}
+    </div>
+  </fieldset>
+
+  <div class="field">
+    <label for="new_days">Posted within (days)</label>
+    <input id="new_days" name="new_days" type="number" min="0" inputmode="numeric" value="{{ selected.new_days }}">
+  </div>
+  <div class="field">
+    <span class="label">Contract</span>
+    <label class="check"><input type="checkbox" name="no_fixed_term" value="1"{% if selected.no_fixed_term %} checked{% endif %}> No fixed-term</label>
+  </div>
+
+  <div class="actions wide">
+    <button type="submit">Search</button>
+    <a class="reset" href="/">Reset</a>
+  </div>
+</form>
+
+{% if error %}
+<p class="notice error" role="alert">{{ error }}</p>
+{% endif %}
+
+{% if result %}
+<section class="results" aria-label="Results">
+  <p class="summary">
+    <strong>{{ result.total }}</strong> {{ 'match' if result.total == 1 else 'matches' }}{% if result.hits|length < result.total %}, showing {{ result.hits|length }}{% endif %}.
+    Search mode: <strong>{{ result.mode_used }}</strong>.
+  </p>
+  {% for w in result.warnings %}
+  <p class="notice warning">Warning: {{ w }}</p>
+  {% endfor %}
+
+  {% for h in result.hits %}
+  <article class="hit">
+    <h2>
+      {% set link = h.url|safe_url %}
+      {% if link %}<a href="{{ link }}" rel="noopener noreferrer" target="_blank">{{ h.title }}</a>{% else %}{{ h.title }}{% endif %}
+    </h2>
+    <p class="company">{{ h.employer }}</p>
+    <dl class="facts">
+      <div><dt>Place</dt><dd>{{ h.where }}</dd></div>
+      <div><dt>Work mode</dt><dd>{{ h.work_mode|human }}</dd></div>
+      <div><dt>Remote from Switzerland</dt><dd>{{ h.remote_from_switzerland|human }}</dd></div>
+      <div><dt>German</dt><dd>{{ h.german|human }}</dd></div>
+      <div><dt>French</dt><dd>{{ h.french|human }}</dd></div>
+      <div><dt>Seniority</dt><dd>{{ h.seniority|human }}</dd></div>
+      <div><dt>Contract</dt><dd>{{ h.contract_type|human }}</dd></div>
+      <div><dt>First seen</dt><dd>{{ h.first_seen }}</dd></div>
+    </dl>
+    {% if h.duplicates %}
+    <p class="more-places">Also at:
+      {% for d in h.duplicates %}
+        {% set dlink = d.url|safe_url %}
+        {% if dlink %}<a href="{{ dlink }}" rel="noopener noreferrer" target="_blank">{{ d.location_raw or 'location not stated' }}</a>{% else %}{{ d.location_raw or 'location not stated' }}{% endif %}{% if not loop.last %}; {% endif %}
+      {% endfor %}
+    </p>
+    {% endif %}
+    {% if h.evidence %}
+    <details>
+      <summary>Supporting quotes</summary>
+      {% for name, quotes in h.evidence.items() if quotes %}
+      <div class="quotes">
+        <h3>{{ labels.get(name, name) }}</h3>
+        {% for q in quotes %}<blockquote>{{ q }}</blockquote>{% endfor %}
+      </div>
+      {% endfor %}
+    </details>
+    {% endif %}
+  </article>
+  {% else %}
+  <p class="empty">No matches.</p>
+  {% endfor %}
+
+  {% if more_url %}<p><a class="more" href="{{ more_url }}">Show more</a></p>{% endif %}
+</section>
+{% endif %}
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">Private search page. Style from the Lyne design tokens (ISC licence); not an SBB product.</div>
+</footer>
+</body>
+</html>

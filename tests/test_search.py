@@ -779,3 +779,28 @@ def test_search_words_mode_never_embeds_and_explicit_modes_report_errors(
     fake.queries.clear()
     code, _, err = cli_search(conn, monkeypatch, capsys, fake, "unicorn", "--canton", "XX")
     assert code == 2 and fake.queries == []  # a bad filter is caught before the API call
+
+
+@pytest.mark.db
+def test_cli_embed_failure_prints_exactly_one_warning_line(conn, seed, monkeypatch, capsys):
+    import logging
+
+    logging.lastResort.setLevel(logging.WARNING)  # what a bare CLI has, outside pytest's capture
+    fake = QueryEmbedder(error=RuntimeError("down"))
+    code, _, err = cli_search(conn, monkeypatch, capsys, fake, "unicorn", "--json")
+    assert code == 0
+    lines = err.strip().splitlines()
+    assert len(lines) == 1 and lines[0].startswith("warning: cannot embed the query (")
+
+
+@pytest.mark.db
+def test_cli_explicit_meaning_keeps_the_detailed_error(conn, seed, monkeypatch, capsys):
+    fake = QueryEmbedder(error=RuntimeError("down"))
+    code, _, err = cli_search(conn, monkeypatch, capsys, fake, "x", "--mode", "meaning")
+    assert code == 2 and "cannot embed the query: RuntimeError('down')" in err
+
+
+def test_new_days_is_bounded():
+    with pytest.raises(SearchError):
+        Filters(new_days=3651).validate()
+    Filters(new_days=3650).validate()

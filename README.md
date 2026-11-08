@@ -53,6 +53,12 @@ the first thing to check, and today that means reading every posting.
   similarity ranking with reciprocal rank fusion, keeping every filter; it
   falls back to full text when the query cannot be embedded. `jobfacts daily`
   embeds new and changed postings. See `docs/search.md`.
+- **HTTP API and search page (Milestone 2).** `jobfacts serve` starts a
+  FastAPI service: `/api/search` returns the same results as `jobfacts search
+  --json`, `/` is a server-rendered search page (filters, facts and their
+  supporting quotes, no JavaScript), `/health` reports the database state.
+  Everything except `/health` sits behind a password (HTTP Basic). It runs on
+  the author's machine; it is not deployed. See `docs/api.md`.
 - **Evaluation.** A local labelling web app, reference labels, and an
   accuracy report per field and per posting language (`docs/labelling.md`).
 - **Search recall check.** `jobfacts search-eval` replays past job
@@ -112,7 +118,6 @@ longer texts.
 
 ## Not built yet
 
-- An HTTP API and a web page (Milestone 2).
 - Deployment, a scheduled daily run, monitoring, and an accuracy gate in CI
   (Milestone 2; the labels are private, so the gate needs a private runner or
   stored results).

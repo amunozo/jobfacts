@@ -34,6 +34,8 @@ with the same generic title at one employer are shown as one group with both lin
 
 ## Query
 
+The command line and the web API (`docs/api.md`) share one code path: `search.prepare` (validate, pick the mode, embed the query) and `search.execute` (run, add warnings); `search.run` chains them.
+
 By default (`--mode hybrid`, `--model mistral`) the query is also embedded and the full-text and
 meaning rankings are fused (see "Search by meaning" below); if the query cannot be embedded the
 search falls back to words only, with a warning. `--mode words` is the plain full-text search

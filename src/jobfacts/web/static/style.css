@@ -1,0 +1,133 @@
+/*
+ * jobfacts search page.
+ *
+ * The values in :root marked "Lyne" are copied from the Lyne design tokens
+ * (@sbb-esta/lyne-design-tokens 2.1.3, https://github.com/sbb-design-systems/lyne-design-tokens),
+ * licence ISC as declared in the package's package.json. See the NOTICE file in the repository
+ * root. Only colours, spacing and the type scale are used. The SBB font, logo and other brand
+ * marks are not used: the font is a system stack. This is not an SBB product.
+ */
+:root {
+  /* Lyne colours */
+  --color-red: #eb0000;          /* --sbb-color-red */
+  --color-red-dark: #c60018;     /* --sbb-color-red125 */
+  --color-black: #000000;        /* --sbb-color-black */
+  --color-charcoal: #212121;     /* --sbb-color-charcoal */
+  --color-iron: #444444;         /* --sbb-color-iron */
+  --color-metal: #767676;        /* --sbb-color-metal */
+  --color-silver: #dcdcdc;       /* --sbb-color-silver */
+  --color-cloud: #e5e5e5;        /* --sbb-color-cloud */
+  --color-milk: #f6f6f6;         /* --sbb-color-milk */
+  --color-white: #ffffff;        /* --sbb-color-white */
+  /* Lyne spacing (--sbb-spacing-fixed-Nx) */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --space-12: 3rem;
+  /* Lyne type scale (--sbb-typo-scale-*) and borders */
+  --text-xs: 0.75rem;
+  --text-s: 0.875rem;
+  --text-m: 1rem;
+  --text-l: 1.125rem;
+  --text-xl: 1.25rem;
+  --text-2xl: 1.5rem;
+  --border-1: 0.0625rem;         /* --sbb-border-width-1x */
+  --border-2: 0.125rem;          /* --sbb-border-width-2x */
+  --radius: 0.125rem;            /* --sbb-border-radius-1x */
+  --heading-line-height: 1.4;    /* --sbb-typo-line-height-heading */
+  /* Not from Lyne: a system font stack (no web fonts are loaded) */
+  --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --max-width: 64rem;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--color-white);
+  color: var(--color-charcoal);
+  font-family: var(--font);
+  font-size: var(--text-m);
+  line-height: 1.5;
+}
+
+.wrap { max-width: var(--max-width); margin: 0 auto; padding: 0 var(--space-4); }
+
+/* Header: white, a red rule, the name in red */
+.site-header { border-bottom: var(--border-1) solid var(--color-cloud); border-top: var(--space-2) solid var(--color-red); }
+.site-header .wrap { display: flex; align-items: baseline; gap: var(--space-4); padding-top: var(--space-4); padding-bottom: var(--space-4); }
+.brand { color: var(--color-red); font-size: var(--text-2xl); font-weight: 700; text-decoration: none; letter-spacing: 0; }
+.tagline { color: var(--color-metal); font-size: var(--text-s); }
+
+main { padding-top: var(--space-6); padding-bottom: var(--space-12); }
+
+/* Form: a strict 12-column grid; fields span 6 columns, wide ones all 12 */
+.search { display: grid; grid-template-columns: repeat(12, 1fr); gap: var(--space-4) var(--space-6); padding-bottom: var(--space-6); border-bottom: var(--border-1) solid var(--color-cloud); }
+.field { grid-column: span 6; min-width: 0; margin: 0; padding: 0; border: 0; }
+.field.wide, .actions.wide { grid-column: 1 / -1; }
+label, legend, .label { display: block; margin-bottom: var(--space-1); padding: 0; font-size: var(--text-s); font-weight: 700; color: var(--color-iron); }
+input[type="search"], input[type="number"], select {
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: var(--border-1) solid var(--color-metal);
+  border-radius: var(--radius);
+  background: var(--color-white);
+  color: var(--color-charcoal);
+  font: inherit;
+}
+.checks { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-4); margin-bottom: var(--space-2); }
+.cantons { gap: var(--space-1) var(--space-3); }
+label.check { display: inline-flex; align-items: center; gap: var(--space-1); margin: 0; font-weight: 400; font-size: var(--text-s); color: var(--color-charcoal); }
+input[type="checkbox"] { accent-color: var(--color-red); width: 1rem; height: 1rem; }
+
+:focus-visible { outline: var(--border-2) solid var(--color-black); outline-offset: 0.1875rem; }  /* --sbb-focus-outline-offset */
+
+.actions { display: flex; align-items: center; gap: var(--space-6); }
+button {
+  padding: var(--space-3) var(--space-8);
+  border: 0;
+  border-radius: var(--radius);
+  background: var(--color-red);
+  color: var(--color-white);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+button:hover { background: var(--color-red-dark); }
+a { color: var(--color-red-dark); }
+.reset { color: var(--color-iron); font-size: var(--text-s); }
+
+/* Messages */
+.notice { margin: var(--space-4) 0; padding: var(--space-3) var(--space-4); border-left: var(--space-1) solid var(--color-metal); background: var(--color-milk); font-size: var(--text-s); }
+.notice.error { border-left-color: var(--color-red); }
+.notice.warning { border-left-color: var(--color-iron); }
+
+/* Results */
+.summary { margin: var(--space-6) 0 var(--space-2); }
+.hit { padding: var(--space-4) 0; border-bottom: var(--border-1) solid var(--color-cloud); }
+.hit h2 { margin: 0; font-size: var(--text-xl); line-height: var(--heading-line-height); }
+.hit h2 a { text-decoration: none; }
+.hit h2 a:hover { text-decoration: underline; }
+.company { margin: 0 0 var(--space-2); color: var(--color-iron); }
+.facts { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--space-2) var(--space-4); margin: 0; }
+.facts div { min-width: 0; }
+.facts dt { font-size: var(--text-xs); color: var(--color-metal); text-transform: uppercase; letter-spacing: 0.04em; }
+.facts dd { margin: 0; font-size: var(--text-s); overflow-wrap: anywhere; }
+.more-places { margin: var(--space-2) 0 0; font-size: var(--text-s); color: var(--color-iron); }
+details { margin-top: var(--space-3); }
+summary { cursor: pointer; font-size: var(--text-s); font-weight: 700; color: var(--color-iron); }
+.quotes h3 { margin: var(--space-3) 0 var(--space-1); font-size: var(--text-s); line-height: var(--heading-line-height); }
+blockquote { margin: 0 0 var(--space-1); padding-left: var(--space-3); border-left: var(--border-2) solid var(--color-red); font-size: var(--text-s); color: var(--color-iron); overflow-wrap: anywhere; }
+.empty { color: var(--color-iron); }
+.more { font-weight: 700; }
+
+.site-footer { border-top: var(--border-1) solid var(--color-cloud); padding: var(--space-4) 0; color: var(--color-metal); font-size: var(--text-xs); }
+
+@media (max-width: 40rem) {
+  .field { grid-column: 1 / -1; }
+  .facts { grid-template-columns: repeat(2, 1fr); }
+  .site-header .wrap { flex-direction: column; gap: var(--space-1); }
+}

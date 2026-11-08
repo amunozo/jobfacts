@@ -2,7 +2,6 @@
 
 import argparse
 import sys
-from dataclasses import replace
 from datetime import date
 from pathlib import Path
 
@@ -21,10 +20,7 @@ def _search(conn, args) -> int:
 
     filters = search.Filters(
         query=args.query,
-        cantons=[
-            c.upper() if c.lower() != "outside_switzerland" else c.lower()
-            for c in _csv(args.canton)
-        ],
+        cantons=search.canton_codes(_csv(args.canton)),
         remote=args.remote,
         remote_unclear=args.remote_unclear,
         work_modes=_csv(args.work_mode),
@@ -35,66 +31,60 @@ def _search(conn, args) -> int:
         seniority=_csv(args.seniority),
         new_days=args.new_days,
         limit=args.limit,
-        mode="words",
-        model=embed.model_id(args.model),
     )
     try:
-        filters.validate()  # before any API call
+        result = search.run(conn, filters, args.mode, args.model, evidence=args.evidence)
     except search.SearchError as error:
         print(f"error: {error}", file=sys.stderr)
         return 2
-    explicit = args.mode is not None
-    mode = args.mode or "hybrid"
-    query_vector = None
-    if mode != "words" and not args.query.strip():
-        if explicit:
-            print(f"error: --mode {mode} needs a query", file=sys.stderr)
-            return 2
-        mode = "words"  # the default mode with no query is the plain filter list
-    if mode != "words":
-        try:
-            query_vector = embed.make_embedder(args.model).embed_query(args.query)
-        except Exception as error:  # no API key, missing optional group, network or API error
-            if mode == "meaning":
-                print(f"error: cannot embed the query: {error!r}", file=sys.stderr)
-                return 2
-            print(
-                f"warning: cannot embed the query ({error!r}); searching by words only",
-                file=sys.stderr,
-            )
-            mode = "words"
-    filters = replace(filters, mode=mode)
-    if mode != "words":
-        missing = search.stale_embedding_count(conn, filters.model)
-        if missing:
-            print(
-                f"warning: {missing} pool postings have no current {args.model} vector (new, "
-                f"changed or not embedded); run `jobfacts embed --model {args.model}`",
-                file=sys.stderr,
-            )
-    stale = search.stale_relevance_count(conn)
-    if stale:
-        print(
-            f"warning: {stale} relevance rows are from an older version; run `jobfacts relevance`",
-            file=sys.stderr,
-        )
-    try:
-        hits, total = search.search(
-            conn, filters, evidence=args.evidence, query_vector=query_vector
-        )
-    except search.SearchError as error:
-        print(f"error: {error}", file=sys.stderr)
-        return 2
+    for warning in result.warnings:
+        print(f"warning: {warning}", file=sys.stderr)
     if args.json:
         print(
             json.dumps(
-                {"total": total, "results": [h.as_dict() for h in hits]},
+                {"total": result.total, "results": [h.as_dict() for h in result.hits]},
                 indent=2,
                 ensure_ascii=False,
             )
         )
     else:
-        print(search.format_table(hits, total, args.evidence))
+        print(search.format_table(result.hits, result.total, args.evidence))
+    return 0
+
+
+def _loopback(host: str) -> bool:
+    import ipaddress
+
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def _serve(args) -> int:
+    import os
+
+    password = os.environ.get("JOBFACTS_WEB_PASSWORD") or None
+    if args.no_auth and not _loopback(args.host):
+        print(
+            "error: --no-auth is only allowed on a loopback host (127.0.0.1, ::1)", file=sys.stderr
+        )
+        return 2
+    if password is None and not args.no_auth:
+        print(
+            "error: set JOBFACTS_WEB_PASSWORD (or pass --no-auth on a loopback host)",
+            file=sys.stderr,
+        )
+        return 2
+    import uvicorn
+
+    from jobfacts.web.app import create_app
+
+    uvicorn.run(
+        create_app(password=password, auth=not args.no_auth), host=args.host, port=args.port
+    )
     return 0
 
 
@@ -248,6 +238,14 @@ def main(argv: list[str] | None = None) -> int:
     )
     sea.add_argument("--evidence", action="store_true", help="print supporting sentences")
     sea.add_argument("--json", action="store_true", help="print JSON for other programs")
+    srv = sub.add_parser("serve", help="the HTTP API and the private search page (docs/api.md)")
+    srv.add_argument("--host", default="127.0.0.1")
+    srv.add_argument("--port", type=int, default=8000)
+    srv.add_argument(
+        "--no-auth",
+        action="store_true",
+        help="no password (only on a loopback host); otherwise JOBFACTS_WEB_PASSWORD is needed",
+    )
     see = sub.add_parser(
         "search-eval", help="recall check: would the search have shown past applications?"
     )
@@ -337,6 +335,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "silver":
         return _silver(args)
+    if args.command == "serve":
+        return _serve(args)
     if args.command == "daily":
         from jobfacts.daily import run_daily
 

@@ -1,0 +1,18 @@
+Third-party material used by jobfacts
+=====================================
+
+Lyne design tokens (colours, spacing, type scale, border widths)
+----------------------------------------------------------------
+Package:  @sbb-esta/lyne-design-tokens 2.1.3 (npm), repository
+          https://github.com/sbb-design-systems/lyne-design-tokens
+Licence:  ISC, as declared in the package's package.json. The package and the repository
+          contain no LICENSE file and name no copyright holder, so none is reproduced here.
+Used in:  src/jobfacts/web/static/style.css (a small set of values, each marked there).
+
+The ISC licence permits use, copying, modification and distribution of the software for any
+purpose with or without fee, provided that the copyright notice and this permission notice
+appear in all copies. The software is provided "as is", without warranty of any kind.
+
+Not used: the SBB font, the SBB logo and other brand marks, the station clock, and the Lyne
+components. The licence of the tokens grants no rights to SBB's trademarks. jobfacts is not
+an SBB product.

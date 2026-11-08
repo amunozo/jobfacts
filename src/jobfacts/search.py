@@ -4,6 +4,9 @@ Only open board postings that the relevance filter kept are searched, using each
 latest successful Jev extraction. Filter semantics are written down in docs/search.md.
 """
 
+import logging
+import unicodedata
+from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 
 import psycopg
@@ -41,8 +44,23 @@ EVIDENCE_FIELDS = [
 ]
 
 
+log = logging.getLogger(__name__)
+
+
 class SearchError(ValueError):
     """A filter value that the spec does not allow."""
+
+
+MAX_NEW_DAYS = 3650
+
+
+class EmbedError(SearchError):
+    """The query could not be embedded and the mode was `meaning` (no fallback exists)."""
+
+
+def canton_codes(values: list[str]) -> list[str]:
+    """Canton codes as the spec writes them: upper case, but `outside_switzerland` lower case."""
+    return [c.upper() if c.lower() != "outside_switzerland" else c.lower() for c in values]
 
 
 @dataclass
@@ -82,8 +100,10 @@ class Filters:
         for name, value in (("german", self.german_max), ("french", self.french_max)):
             if value is not None and value not in LANGUAGE_MAX:
                 raise SearchError(f"--{name}-max must be one of {list(LANGUAGE_MAX)}")
-        if self.new_days is not None and self.new_days < 0:
-            raise SearchError("--new-days must be 0 or more")
+        if self.new_days is not None and not 0 <= self.new_days <= MAX_NEW_DAYS:
+            raise SearchError(f"--new-days must be between 0 and {MAX_NEW_DAYS}")
+        if any(unicodedata.category(c) == "Cc" and c not in "\t\n\r" for c in self.query):
+            raise SearchError("the query contains control characters")
         if self.limit < 1:
             raise SearchError("--limit must be at least 1")
 
@@ -389,3 +409,113 @@ def format_table(hits: list[Hit], total: int, evidence: bool = False) -> str:
                     lines.append(f"   - {name}: " + " / ".join(_cut(t, 200) for t in texts))
         lines.append("")
     return "\n".join(lines).rstrip()
+
+
+@dataclass
+class Plan:
+    """What `prepare` decided before any database access: the mode that will run, the query's
+    embedding (for meaning and hybrid) and the warnings so far."""
+
+    mode: str
+    model: str  # embedding model id (posting_embeddings.model)
+    alias: str  # embedding model alias (`mistral`, ...), for the warning texts
+    vector: list[float] | None = None
+    warnings: list[str] = field(default_factory=list)
+
+
+@dataclass
+class RunResult:
+    hits: list[Hit]
+    total: int
+    mode_used: str
+    warnings: list[str]
+
+
+def prepare(
+    f: Filters,
+    mode: str | None = None,
+    alias: str = embed.DEFAULT_MODEL,
+    embedder_factory: Callable[[str], embed.Embedder] | None = None,
+    error_detail: bool = True,
+) -> Plan:
+    """Validate the filters, pick the mode and embed the query. No database access, so a web
+    server does not hold a connection while it waits for the embedding API.
+
+    `mode=None` is the default: hybrid, which becomes words when there is no query (the plain
+    filter list) or when the query cannot be embedded (a warning says so). An explicit `meaning`
+    or `hybrid` without a query raises `SearchError`; an explicit `meaning` that cannot be
+    embedded raises `EmbedError`. `error_detail=False` leaves the exception text out of the
+    warning (a web page must not show internals).
+    """
+    try:
+        model = embed.model_id(alias)
+    except ValueError as error:
+        raise SearchError(str(error)) from error
+    f = replace(f, mode="words", model=model)
+    f.validate()  # before any API call
+    explicit = mode is not None
+    mode = mode or "hybrid"
+    if mode not in MODES:
+        raise SearchError(f"unknown mode {mode!r}; allowed: {MODES}")
+    plan = Plan("words", model, alias)
+    if mode != "words" and not f.query.strip():
+        if explicit:
+            raise SearchError(f"--mode {mode} needs a query")
+        return plan  # the default mode with no query is the plain filter list
+    if mode == "words":
+        return plan
+    try:
+        make = embedder_factory or embed.make_embedder  # looked up now: tests replace it
+        plan.vector = make(alias).embed_query(f.query)
+    except Exception as error:  # no API key, missing optional group, network or API error
+        if mode == "meaning":
+            detail = f": {error!r}" if error_detail else ""
+            if not error_detail:
+                log.error("cannot embed the query: %r", error)
+            raise EmbedError(f"cannot embed the query{detail}") from error
+        # The CLI prints the warning itself; only a server (error_detail=False) logs at warning.
+        log.log(
+            logging.DEBUG if error_detail else logging.WARNING,
+            "cannot embed the query (%r); searching by words only",
+            error,
+        )
+        detail = f" ({error!r})" if error_detail else ""
+        plan.warnings.append(f"cannot embed the query{detail}; searching by words only")
+        return plan
+    plan.mode = mode
+    return plan
+
+
+def execute(conn: psycopg.Connection, f: Filters, plan: Plan, evidence: bool = False) -> RunResult:
+    """Run the search of a `Plan` and add the warnings about stale data."""
+    warnings = list(plan.warnings)
+    if plan.mode != "words":
+        missing = stale_embedding_count(conn, plan.model)
+        if missing:
+            warnings.append(
+                f"{missing} pool postings have no current {plan.alias} vector (new, "
+                f"changed or not embedded); run `jobfacts embed --model {plan.alias}`"
+            )
+    stale = stale_relevance_count(conn)
+    if stale:
+        warnings.append(
+            f"{stale} relevance rows are from an older version; run `jobfacts relevance`"
+        )
+    f = replace(f, mode=plan.mode, model=plan.model)
+    hits, total = search(conn, f, evidence=evidence, query_vector=plan.vector)
+    return RunResult(hits, total, plan.mode, warnings)
+
+
+def run(
+    conn: psycopg.Connection,
+    f: Filters,
+    mode: str | None = None,
+    alias: str = embed.DEFAULT_MODEL,
+    embedder_factory: Callable[[str], embed.Embedder] | None = None,
+    evidence: bool = False,
+    error_detail: bool = True,
+) -> RunResult:
+    """The whole search as the command line and the web API run it: `prepare` then `execute`.
+    `f.mode` and `f.model` are ignored; `mode` and `alias` decide."""
+    plan = prepare(f, mode, alias, embedder_factory, error_detail)
+    return execute(conn, f, plan, evidence)

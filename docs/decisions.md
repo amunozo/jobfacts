@@ -588,3 +588,28 @@ Newest at the bottom.
 - **Result:** see `data/private/reports/meaning_eval_2026-11-08.md` (800
   characters) and `meaning_eval_2026-11-08_long.md` (per-model budgets);
   private, they name postings. Summary in `docs/search.md`.
+
+## 2026-11-08: HTTP API and private search page: FastAPI, server-rendered HTML, HTTP Basic
+- **What:** `jobfacts serve` runs a FastAPI app: `GET /health` (open), `GET /api/search`
+  (JSON) and `GET /` (search page), all but `/health` behind HTTP Basic with one password from
+  `JOBFACTS_WEB_PASSWORD` (compared in constant time; the server refuses to start without it
+  unless `--no-auth` is given on a loopback address). The page is plain Jinja2 HTML and one
+  CSS file with a content-security policy that allows only the server itself, so it needs no
+  JavaScript, no CDN and no web fonts. The CSS takes its colours, spacing and type scale from
+  the Lyne design tokens (ISC, `NOTICE`); no SBB font, logo or icons. The CLI and the API both
+  run `search.prepare` and `search.execute` (`search.run` is the two in a row), so the filters
+  and the fallback rules live in one place. Database connections come from a small
+  `psycopg_pool.ConnectionPool`; the query is embedded before a connection is borrowed.
+- **Why:** a private tool for one user needs a password, not accounts; HTTP Basic is built
+  into every browser and needs no login page, sessions or cookies. Server-rendered HTML is
+  enough for a form and a result list, is easy to explain, and has a small attack surface
+  (autoescaping, http/https links only). A pool gives the later load test a realistic
+  connection setup. One shared search function means the API cannot drift from the CLI that
+  the owner's other tool calls.
+- **Rejected:** a JavaScript front end (more code and tooling, no feature needed it); login
+  page with sessions or OAuth (more moving parts for one user); the generated `/docs` page
+  (loads scripts from a CDN, which the policy forbids); one connection per request (slower and
+  not what a real deployment does); showing the embedding error text in warnings (could leak
+  internals; the full error goes to the server log instead).
+- **Open:** Basic authentication is clear text without TLS, so a deployment beyond localhost
+  needs HTTPS in front; there is no limit on password guesses.
