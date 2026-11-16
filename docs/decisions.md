@@ -711,3 +711,30 @@ Newest at the bottom.
 - **Rejected:** a schema per process (several tests open second connections
   to the schema by name); taking `public` off the search path (the migrations
   name the `vector` type without a schema).
+
+## 2026-11-16: A similarity floor on the meaning list, and the hybrid count reworded
+- **What:** a posting enters the meaning list only if its cosine similarity to
+  the query is at least a per-model floor (0.70 for `mistral-embed`; other
+  models have none until measured). In hybrid mode the count is now called
+  candidates ("Showing the 20 closest of 182 candidates.", "12 results.");
+  the JSON field `total` keeps its name.
+- **Why:** the meaning list always returned its nearest 200, so a nonsense
+  query still gave about 180 results. Measured on 47 past applications, 14
+  search phrases and 8 nonsense queries: at 0.70 recall@20 stays at 24 of 47
+  (recall@50 36 -> 35) and nonsense queries go from about 180 results to none
+  or only the word matches. The floor does not shrink the count for real
+  queries (median about 180), so the number cannot be read as "matches"; that
+  is why it is worded as candidates.
+- **Rejected:** a higher floor (0.74), which drops recall@20 to 20; a floor
+  relative to the best hit, which lost found jobs before it helped; renaming
+  `total` (another program reads it).
+
+## 2026-11-16: Postings of an employer removed from the list are closed
+- **What:** when an employer is no longer in `config/employers.toml`, the next
+  collection run closes its open board postings and counts them as closed.
+- **Why:** a removed employer was only marked inactive and never read again,
+  so nothing could close its postings and they stayed in search for ever. A
+  board that is not read cannot show that a posting is still open.
+- **Rejected:** hiding inactive employers in the search query (the postings
+  would still count as open everywhere else); deleting the postings (loses
+  history, and listing the employer again could not reopen them).

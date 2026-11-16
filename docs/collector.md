@@ -44,6 +44,9 @@ throwaway schema `test_jobfacts` in the compose database and are skipped
   hash (url, title, location, description) changed.
 - A stored open posting missing from a successful read gets `closed_at`.
 - A failed read is only logged in `board_reads`; it never closes anything.
+- An employer removed from `config/employers.toml` becomes inactive (never
+  read again) and its open postings are closed at the next run: a board that
+  is not read cannot show that a posting is still open.
 - A closed posting that appears again is reopened (`closed_at` cleared,
   counted as updated).
 - An empty response from a board that still has open postings is treated

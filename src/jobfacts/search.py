@@ -32,6 +32,10 @@ WORK_MODES = [v for v in FIELDS["work_mode"].values if v != "not_stated"]
 MODES = ["words", "meaning", "hybrid"]
 TOP_PER_LIST = 200  # hybrid: each list contributes its best 200 postings to the fusion
 RRF_K = 60
+# Model id -> lowest cosine similarity a posting needs to enter the meaning list. Measured for
+# mistral-embed on 16 November 2026: nonsense queries drop to no meaning results and recall@20 on
+# past applications is unchanged. Other models have no floor until it is measured.
+MIN_SIMILARITY: dict[str, float] = {"mistral-embed": 0.70}
 EVIDENCE_FIELDS = [
     "office_cantons",
     "work_mode",
@@ -207,6 +211,9 @@ def build(
         rank = "1 - (emb.embedding <=> %(qvec)s::vector)"
         params["emb_model"] = f.model
         params["qvec"] = vector_literal(query_vector)
+        if f.model in MIN_SIMILARITY:
+            where.append("1 - (emb.embedding <=> %(qvec)s::vector) >= %(min_sim)s")
+            params["min_sim"] = MIN_SIMILARITY[f.model]
         order = "rank DESC, p.first_seen_at DESC, p.id"
     elif f.query.strip():
         where.append("p.search_tsv @@ websearch_to_tsquery('simple', %(query)s)")
@@ -386,10 +393,22 @@ def _cut(text: str, width: int) -> str:
     return text if len(text) <= width else text[: width - 1] + "…"
 
 
-def format_table(hits: list[Hit], total: int, evidence: bool = False) -> str:
+def count_text(total: int, shown: int, mode_used: str = "words") -> str:
+    """The count line. In hybrid mode `total` counts candidates (word matches plus meaning-list
+    postings above the floor), not matches, and is worded that way."""
+    if mode_used != "hybrid":
+        return f"{total} matches, showing {shown}"
+    if shown < total:
+        return f"Showing the {shown} closest of {total} candidates."
+    return f"{total} result." if total == 1 else f"{total} results."
+
+
+def format_table(
+    hits: list[Hit], total: int, evidence: bool = False, mode_used: str = "words"
+) -> str:
     if not hits:
         return "no matches"
-    lines = [f"{total} matches, showing {len(hits)}", ""]
+    lines = [count_text(total, len(hits), mode_used), ""]
     for i, h in enumerate(hits, 1):
         lines.append(f"{i}. {_cut(h.title, 90)}  ({h.employer})")
         lines.append(

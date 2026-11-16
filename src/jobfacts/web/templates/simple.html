@@ -16,7 +16,8 @@
 {% if result %}
 <section class="results" aria-label="Results">
   <p class="summary">
-    <strong>{{ result.total }}</strong> {{ 'match' if result.total == 1 else 'matches' }}{% if result.hits|length < result.total %}, showing {{ result.hits|length }}{% endif %}.
+    {% if result.mode_used == 'hybrid' %}{% if result.hits|length < result.total %}Showing the {{ result.hits|length }} closest of {{ result.total }} candidates.{% elif result.total %}{{ result.total }} {{ 'result' if result.total == 1 else 'results' }}.{% endif %}
+    {% else %}<strong>{{ result.total }}</strong> {{ 'match' if result.total == 1 else 'matches' }}{% if result.hits|length < result.total %}, showing {{ result.hits|length }}{% endif %}.{% endif %}
     Search mode: <strong>{{ result.mode_used }}</strong>.
   </p>
   {% for w in result.warnings %}

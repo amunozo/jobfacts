@@ -81,6 +81,10 @@ The answer is the object of `jobfacts search --json` with two more keys:
  "mode_used": "hybrid", "warnings": []}
 ```
 
+`total` counts jobs, not postings. When `mode_used` is `hybrid` it counts candidates (word
+matches plus meaning-list postings above the similarity floor), not matches; in the other modes it
+is the number of matches. The field keeps its name.
+
 `mode_used` is the mode that really ran: the default hybrid becomes `words` when there is no
 query, or when the query could not be embedded (then a warning says so; the warning does not
 contain the error text). `warnings` also say when embeddings or relevance scores are out of date.

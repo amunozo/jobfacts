@@ -24,8 +24,9 @@ class Counts:
     closed: int = 0
 
 
-def load_employers(conn: psycopg.Connection, path: Path = EMPLOYERS_FILE) -> None:
-    """Upsert employers from the TOML file. Employers no longer listed become inactive."""
+def load_employers(conn: psycopg.Connection, path: Path = EMPLOYERS_FILE) -> int:
+    """Upsert employers from the TOML file. Employers no longer listed become inactive and their
+    open board postings are closed. Returns how many postings that closed."""
     entries = tomllib.loads(path.read_text())["employer"]
     for entry in entries:
         if "country" in entry:
@@ -56,7 +57,14 @@ def load_employers(conn: psycopg.Connection, path: Path = EMPLOYERS_FILE) -> Non
         "UPDATE employers SET active = false WHERE (ats || ' ' || board_id) <> ALL(%s)",
         ([f"{a} {b}" for a, b in keys],),
     )
+    # A board that is no longer read can no longer prove its postings are open: close them,
+    # or they would stay in search for ever. (Listing the employer again reopens what it finds.)
+    closed = conn.execute(
+        "UPDATE postings SET closed_at = now() WHERE closed_at IS NULL AND origin = 'board' "
+        "AND employer_id IN (SELECT id FROM employers WHERE NOT active)"
+    ).rowcount
     conn.commit()
+    return closed
 
 
 def start_run(conn: psycopg.Connection) -> int:

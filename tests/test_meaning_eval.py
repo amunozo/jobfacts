@@ -130,6 +130,33 @@ def test_orders_over_the_pool(conn, world):
 
 
 @pytest.mark.db
+def test_the_similarity_floor_applies_to_meaning_and_hybrid_orders(conn, world, monkeypatch):
+    from jobfacts import search
+
+    monkeypatch.setitem(search.MIN_SIMILARITY, "m", 0.8)
+    embed.save_embeddings(
+        conn,
+        "m",
+        [
+            (world["ml"], "t", "h", [1.0, 0.0]),
+            (world["other"], "t", "h", [0.5, 0.866]),  # similarity 0.5: below the floor
+        ],
+        800,
+    )
+    meaning = me.meaning_order(conn, "m", [1.0, 0.0])
+    assert meaning == [world["ml"]]
+    assert me.hybrid_order([], meaning) == [world["ml"]]
+    # a model without a floor keeps every posting that has a vector
+    embed.save_embeddings(
+        conn,
+        "no-floor",
+        [(world["ml"], "t", "h", [1.0, 0.0]), (world["other"], "t", "h", [0.5, 0.866])],
+        800,
+    )
+    assert me.meaning_order(conn, "no-floor", [1.0, 0.0]) == [world["ml"], world["other"]]
+
+
+@pytest.mark.db
 def test_wanted_jobs_and_the_full_run(conn, world, tmp_path, capsys):
     apps = tmp_path / "apps"
     for role in ("Machine Learning Engineer", "Research Scientist", "Accountant", "Unknown Role"):

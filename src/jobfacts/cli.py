@@ -49,7 +49,11 @@ def _search(conn, args) -> int:
             )
         )
     else:
-        print(search.format_table(result.hits, result.total, args.evidence))
+        print(
+            search.format_table(
+                result.hits, result.total, args.evidence, mode_used=result.mode_used
+            )
+        )
     return 0
 
 

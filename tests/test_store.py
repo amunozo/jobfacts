@@ -187,3 +187,38 @@ def test_the_test_schema_is_locked_while_a_test_uses_it(conn):
         assert got is False
     finally:
         other.close()
+
+
+def test_employer_removed_from_the_file_has_its_postings_closed_and_reopened_if_listed_again(
+    conn, tmp_path
+):
+    path = tmp_path / "e.toml"
+    both = (
+        '[[employer]]\nname="Kept"\nats="fake"\nboard_id="kept"\n'
+        '[[employer]]\nname="Gone"\nats="fake"\nboard_id="gone"\n'
+    )
+    path.write_text(both)
+
+    def fake(client, board_id, extra):
+        return [make(f"{board_id}-1")]
+
+    collect(conn, fetchers={"fake": fake}, employers_file=path)
+    path.write_text('[[employer]]\nname="Kept"\nats="fake"\nboard_id="kept"\n')
+    # a past application's posting belongs to an employer that is never in the file: it stays
+    applied = conn.execute(
+        "INSERT INTO employers (name, ats, board_id, active) "
+        "VALUES ('Applied', 'application', 'Applied', false) RETURNING id"
+    ).fetchone()[0]
+    conn.execute(
+        "INSERT INTO postings (employer_id, source_job_id, url, title, origin, content_hash) "
+        "VALUES (%s, 'app-1', 'https://example.test/app-1', 'T', 'application', 'h')",
+        (applied,),
+    )
+    s = collect(conn, fetchers={"fake": fake}, employers_file=path)
+    assert s.boards_ok == 1  # the removed board is not read
+    assert s.counts.closed == 1  # and its posting is counted as closed
+    assert state(conn, "gone-1") is True and state(conn, "kept-1") is False
+    assert state(conn, "app-1") is False
+    path.write_text(both)
+    collect(conn, fetchers={"fake": fake}, employers_file=path)
+    assert state(conn, "gone-1") is False

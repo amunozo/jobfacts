@@ -90,7 +90,7 @@ Without `--german-max`, German is not filtered. Values outside the spec
 
 ```
 $ jobfacts search "machine learning" --canton VD,GE --german-max intermediate --limit 2
-14 matches, showing 2
+Showing the 2 closest of 14 candidates.
 
 1. Machine Learning Engineer  (Example AG)
    Lausanne | hybrid | de: not_mentioned | fr: nice_to_have | mid | seen 2026-11-01
@@ -244,9 +244,20 @@ runs the full-text and the meaning queries with the same filters, takes the best
 each and fuses them with reciprocal rank fusion: a posting scores the sum of 1 / (60 + position)
 over the lists it is in. RRF uses positions only, so it needs no scaling between a text rank and
 a similarity. A posting in only one list still counts. Only these (at most 400) postings are
-candidates, so in hybrid `total` counts the jobs among them, not all matches. `--mode meaning`
-ranks by similarity alone: every posting that has a vector for `--model` and passes the filters
-is a candidate, so a weak match is still listed. `--mode words` is the full-text search above,
+candidates, so in hybrid `total` counts the jobs among them (word matches plus meaning-list
+postings above the floor below), not all matches; the web pages and the command line therefore say
+"Showing the 20 closest of 182 candidates." (or "12 results." when all are shown) instead of
+"matches". `--mode meaning` ranks by similarity alone: every posting that has a vector for
+`--model` and passes the filters and the floor is a candidate.
+
+**Similarity floor.** The meaning list always had its nearest 200 postings, so even a nonsense
+query returned about 180 results. A posting now enters the meaning list (in `hybrid` and in
+`--mode meaning`) only if its cosine similarity to the query is at least a per-model floor,
+`MIN_SIMILARITY` in `search.py`: 0.70 for `mistral-embed`, measured on 16 November 2026 (nonsense
+queries get no meaning results; recall@20 on past applications is unchanged). Models without an
+entry have no floor until one is measured. The floor does not shrink the count for real queries
+(about 180 candidates), which is why it is called candidates, not matches. `meaning-eval` applies
+the same floor, so its numbers match what search does. `--mode words` is the full-text search above,
 unchanged, and never calls an API. Every filter applies in all modes; grouping of duplicates and
 `--json` work as before (`rank` is the similarity, the RRF score or the text rank).
 

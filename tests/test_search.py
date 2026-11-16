@@ -685,6 +685,46 @@ def test_hybrid_applies_filters_to_both_lists(conn, seed):
     assert set(titles) == {"be job", "be meaning"}
 
 
+# Cosine similarity to the query vector [1, 0, 0]: 1.0 (near), 0.8 (edge), 0.5 (far); the floor
+# fixture is 0.75.
+NEAR, EDGE, FAR = [1.0, 0.0, 0.0], [0.8, 0.6, 0.0], [0.5, 0.866, 0.0]
+
+
+@pytest.fixture
+def floor(monkeypatch):
+    monkeypatch.setitem(search.MIN_SIMILARITY, MODEL, 0.75)
+
+
+@pytest.mark.db
+def test_the_floor_removes_far_postings_from_hybrid_and_meaning(conn, seed, floor):
+    near = seed.add(title="near", desc="horses")
+    edge = seed.add(title="above the floor", desc="horses")
+    far = seed.add(title="far", desc="horses")
+    words = seed.add(title="words", desc="unicorn wrangler")
+    vectors(conn, {near: NEAR, edge: EDGE, far: FAR, words: FAR})
+    titles, total = run(conn, "hybrid", query="unicorn wrangler")
+    assert set(titles) == {"near", "above the floor", "words"} and total == 3  # "far" is out
+    titles, total = run(conn, "meaning")
+    assert titles == ["near", "above the floor"] and total == 2
+
+
+@pytest.mark.db
+def test_a_model_without_a_floor_is_not_filtered(conn, seed):
+    assert MODEL not in search.MIN_SIMILARITY
+    near = seed.add(title="near")
+    far = seed.add(title="far")
+    vectors(conn, {near: NEAR, far: FAR})
+    assert run(conn, "meaning") == (["near", "far"], 2)
+
+
+@pytest.mark.db
+def test_nothing_above_the_floor_and_no_word_match_is_total_zero(conn, seed, floor):
+    far = seed.add(title="far", desc="horses")
+    vectors(conn, {far: FAR})
+    assert run(conn, "hybrid", query="zzzz qqqq") == ([], 0)
+    assert run(conn, "meaning") == ([], 0)
+
+
 # ---------- stale and missing vectors; the command line (default hybrid, fallback) ----------
 
 
@@ -804,3 +844,38 @@ def test_new_days_is_bounded():
     with pytest.raises(SearchError):
         Filters(new_days=3651).validate()
     Filters(new_days=3650).validate()
+
+
+@pytest.mark.parametrize(
+    ("total", "shown", "mode", "text"),
+    [
+        (182, 20, "hybrid", "Showing the 20 closest of 182 candidates."),
+        (12, 12, "hybrid", "12 results."),
+        (1, 1, "hybrid", "1 result."),
+        (12, 5, "words", "12 matches, showing 5"),
+        (12, 12, "meaning", "12 matches, showing 12"),
+    ],
+)
+def test_count_text_calls_hybrid_totals_candidates(total, shown, mode, text):
+    assert search.count_text(total, shown, mode) == text
+
+
+@pytest.mark.db
+def test_the_command_line_table_words_the_count_by_mode(conn, seed):
+    for i in range(3):
+        seed.add(title=f"job {i}")
+    hits, total = search.search(conn, Filters(limit=2))
+    assert search.format_table(hits, total).startswith("3 matches, showing 2")
+    hybrid = search.format_table(hits, total, mode_used="hybrid")
+    assert hybrid.startswith("Showing the 2 closest of 3 candidates.") and "matches" not in hybrid
+
+
+@pytest.mark.db
+def test_the_command_line_words_the_hybrid_count_as_candidates(conn, seed, monkeypatch, capsys):
+    near = seed.add(title="near", desc="horses")
+    far = seed.add(title="far", desc="ponies")
+    vectors(conn, {near: [1.0, 0.0, 0.0], far: [0.9, 0.1, 0.0]}, model="mistral-embed")
+    code, out, _ = cli_search(
+        conn, monkeypatch, capsys, QueryEmbedder(), "anything", "--limit", "1"
+    )
+    assert code == 0 and out.startswith("Showing the 1 closest of 2 candidates.")

@@ -29,11 +29,6 @@ ats = "greenhouse"
 board_id = "scandit"
 
 [[employer]]
-name = "GetYourGuide"
-ats = "greenhouse"
-board_id = "getyourguide"
-
-[[employer]]
 name = "Ledgy"
 ats = "greenhouse"
 board_id = "ledgy"
@@ -67,11 +62,6 @@ board_id = "smallpdf"
 name = "Tether"
 ats = "recruitee"
 board_id = "tether"
-
-[[employer]]
-name = "ELCA"
-ats = "recruitee"
-board_id = "elca"
 
 [[employer]]
 name = "Climeworks"

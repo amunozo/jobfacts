@@ -24,7 +24,7 @@ import psycopg
 from jobfacts import embed
 from jobfacts import search_eval as se
 from jobfacts.grouping import title_key
-from jobfacts.search import RRF_K, TOP_PER_LIST, rrf, stale_embedding_count
+from jobfacts.search import MIN_SIMILARITY, RRF_K, TOP_PER_LIST, rrf, stale_embedding_count
 from jobfacts.stats import wilson
 from jobfacts.testset import PRIVATE_DIR
 
@@ -164,13 +164,18 @@ def words_order(conn: psycopg.Connection, phrase: str) -> list[int]:
 
 
 def meaning_order(conn: psycopg.Connection, model: str, vector: list[float]) -> list[int]:
-    """Pool postings with a vector for `model`, closest to the query vector first."""
+    """Pool postings with a vector for `model`, closest to the query vector first. Postings below
+    the model's similarity floor (`search.MIN_SIMILARITY`) are left out, as in `jobfacts search`."""
+    floor = ""
+    params = {**embed.pool_params(), "model": model, "qvec": embed.vector_literal(vector)}
+    if model in MIN_SIMILARITY:
+        floor = " AND 1 - (emb.embedding <=> %(qvec)s::vector) >= %(min_sim)s"
+        params["min_sim"] = MIN_SIMILARITY[model]
     sql = (
         f"SELECT p.id {embed.POOL_FROM} "
         "JOIN posting_embeddings emb ON emb.posting_id = p.id AND emb.model = %(model)s "
-        f"{embed.POOL_WHERE} ORDER BY emb.embedding <=> %(qvec)s::vector, p.id"
+        f"{embed.POOL_WHERE}{floor} ORDER BY emb.embedding <=> %(qvec)s::vector, p.id"
     )
-    params = {**embed.pool_params(), "model": model, "qvec": embed.vector_literal(vector)}
     return [r[0] for r in conn.execute(sql, params)]
 
 

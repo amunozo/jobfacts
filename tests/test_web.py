@@ -442,6 +442,36 @@ def test_page_offers_more_results_with_the_filters_kept(conn, seed):
     assert "showing 2" in html and "limit=4" in html and "canton=ZH" in html
 
 
+def _page(conn, seed, path, count, embedder=None):
+    """Seed `count` postings with the same vector; the pages show at most 20 (the default)."""
+    for i in range(count):
+        pid = seed.add(title=f"job {i}", desc="horses")
+        vectors(conn, {pid: [1.0, 0.0, 0.0]}, model="mistral-embed")
+    client = make_client(conn, embedder or QueryEmbedder())
+    return client.get(path, params={"query": "horses"}, headers=basic()).text
+
+
+@pytest.mark.db
+@pytest.mark.parametrize("path", ["/", "/search"])
+def test_pages_call_the_hybrid_count_candidates(conn, seed, path):
+    html = _page(conn, seed, path, 22)
+    assert "Showing the 20 closest of 22 candidates." in html and "matches" not in html
+    assert "Search mode: <strong>hybrid</strong>" in html
+
+
+@pytest.mark.db
+@pytest.mark.parametrize("path", ["/", "/search"])
+def test_pages_say_results_when_every_candidate_is_shown(conn, seed, path):
+    assert "3 results." in _page(conn, seed, path, 3)
+
+
+@pytest.mark.db
+@pytest.mark.parametrize("path", ["/", "/search"])
+def test_pages_keep_matches_when_hybrid_fell_back_to_words(conn, seed, path):
+    html = _page(conn, seed, path, 22, QueryEmbedder(error=RuntimeError("down")))
+    assert "22</strong> matches, showing 20" in html and "candidates" not in html
+
+
 # ---------- helpers without a database ----------
 
 

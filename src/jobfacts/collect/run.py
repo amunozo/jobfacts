@@ -31,13 +31,14 @@ def collect(
     """`fetchers` maps ats name to a fetch function; tests pass fakes, nothing else does."""
     fetchers = fetchers or BOARDS
     started = time.monotonic()
-    store.load_employers(conn, employers_file or store.EMPLOYERS_FILE)
+    closed_removed = store.load_employers(conn, employers_file or store.EMPLOYERS_FILE)
     sql = "SELECT id, name, ats, board_id, extra FROM employers WHERE active"
     employers = conn.execute(sql).fetchall()
     employers = [
         e for e in employers if e[2] in fetchers and (only is None or only in (e[1], e[2]))
     ]
     summary = RunSummary(run_id=store.start_run(conn))
+    summary.counts.closed += closed_removed  # postings of employers removed from the file
     # Employers that merge several Workday sites key postings by requisition without the
     # `-N` site suffix; stored ids from before the merge are rewritten (rows keep their id).
     for e in employers:

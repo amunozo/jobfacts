@@ -26,11 +26,13 @@ the first thing to check, and today that means reading every posting.
 ## What works today
 
 - **Collection.** Reads the official public job-board APIs and feeds of about
-  165 employers (168 boards): Greenhouse, Lever, Ashby, SmartRecruiters,
+  165 employers (166 boards): Greenhouse, Lever, Ashby, SmartRecruiters,
   Recruitee, Workable, Personio, Teamtailor and Workday (sitemap and
   structured data only). Postings go into PostgreSQL; postings that disappear
-  are marked closed. A run on 13 November 2026 read 166 of the 168 boards (2
-  failed: one answered 404, one answered empty) and left 6,462 open postings.
+  are marked closed. A run on 13 November 2026 read 166 boards and failed on 2
+  more (one answered 404, one answered empty), which were then removed from
+  the list; it left 6,462 open postings. Postings of a removed board are
+  closed at the next run.
   Each board is committed as it is read, so a crash loses at most one board. See `docs/collector.md`.
 - **Relevance filter.** A cheap classifier model scores whether a posting is
   an AI, ML, data or research role from its title and first sentences. The
@@ -51,7 +53,9 @@ the first thing to check, and today that means reading every posting.
   embedded with Mistral `mistral-embed` (first 6,000 characters) into
   pgvector. `jobfacts search` by default fuses the full-text ranking and the
   similarity ranking with reciprocal rank fusion, keeping every filter; it
-  falls back to full text when the query cannot be embedded. `jobfacts daily`
+  falls back to full text when the query cannot be embedded. A posting enters
+  the similarity ranking only above a measured similarity floor, so a
+  nonsense query returns nothing instead of its 200 nearest postings. `jobfacts daily`
   embeds new and changed postings. See `docs/search.md`.
 - **HTTP API and search page (Milestone 2).** `jobfacts serve` starts a
   FastAPI service: `/api/search` returns the same results as `jobfacts search
