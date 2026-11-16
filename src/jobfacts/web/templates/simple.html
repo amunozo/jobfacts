@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block content %}
+<form method="get" action="/search" class="simple{% if not searched %} simple-home{% endif %}" role="search">
+  <label for="query" class="simple-label">Search AI and data jobs in Switzerland</label>
+  <div class="simple-row">
+    <input id="query" name="query" type="search" maxlength="500" value="{{ query }}" placeholder="e.g. machine learning engineer"{% if not searched %} autofocus{% endif %}>
+    <button type="submit">Search</button>
+  </div>
+  <p class="simple-hint">Searches by words and by meaning. <a href="{{ filters_url }}">All filters</a></p>
+</form>
+
+{% if error %}
+<p class="notice error" role="alert">{{ error }}</p>
+{% endif %}
+
+{% if result %}
+<section class="results" aria-label="Results">
+  <p class="summary">
+    <strong>{{ result.total }}</strong> {{ 'match' if result.total == 1 else 'matches' }}{% if result.hits|length < result.total %}, showing {{ result.hits|length }}{% endif %}.
+    Search mode: <strong>{{ result.mode_used }}</strong>.
+  </p>
+  {% for w in result.warnings %}
+  <p class="notice warning">Warning: {{ w }}</p>
+  {% endfor %}
+
+  {% for h in result.hits %}
+  <article class="hit">
+    <h2>
+      {% set link = h.url|safe_url %}
+      {% if link %}<a href="{{ link }}" rel="noopener noreferrer" target="_blank">{{ h.title }}</a>{% else %}{{ h.title }}{% endif %}
+    </h2>
+    <p class="company">{{ h.employer }} · {{ h.where }}</p>
+    <dl class="facts">
+      <div><dt>Work mode</dt><dd>{{ h.work_mode|human }}</dd></div>
+      <div><dt>Remote from Switzerland</dt><dd>{{ h.remote_from_switzerland|human }}</dd></div>
+      <div><dt>German</dt><dd>{{ h.german|human }}</dd></div>
+      <div><dt>French</dt><dd>{{ h.french|human }}</dd></div>
+      <div><dt>Seniority</dt><dd>{{ h.seniority|human }}</dd></div>
+      <div><dt>Contract</dt><dd>{{ h.contract_type|human }}</dd></div>
+    </dl>
+    {% if h.duplicates %}
+    <p class="more-places">Also at:
+      {% for d in h.duplicates %}
+        {% set dlink = d.url|safe_url %}
+        {% if dlink %}<a href="{{ dlink }}" rel="noopener noreferrer" target="_blank">{{ d.location_raw or 'location not stated' }}</a>{% else %}{{ d.location_raw or 'location not stated' }}{% endif %}{% if not loop.last %}; {% endif %}
+      {% endfor %}
+    </p>
+    {% endif %}
+    {% if h.evidence %}
+    <details>
+      <summary>Supporting quotes</summary>
+      {% for name, quotes in h.evidence.items() if quotes %}
+      <div class="quotes">
+        <h3>{{ labels.get(name, name) }}</h3>
+        {% for q in quotes %}<blockquote>{{ q }}</blockquote>{% endfor %}
+      </div>
+      {% endfor %}
+    </details>
+    {% endif %}
+  </article>
+  {% else %}
+  <p class="empty">No matches.</p>
+  {% endfor %}
+
+  {% if more_url %}<p><a class="more" href="{{ more_url }}">Show more (with filters)</a></p>{% endif %}
+</section>
+{% endif %}
+{% endblock %}

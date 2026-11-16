@@ -35,6 +35,7 @@ An **endpoint** is one URL the server answers, with the kind of answer it gives.
 | `GET /health` | none | JSON, 200 or 503 |
 | `GET /api/search` | password | JSON |
 | `GET /` | password | HTML page (no JavaScript) |
+| `GET /search` | password | HTML page: a query box only |
 | `GET /runs` | password | HTML page: the last 30 daily runs |
 | `GET /static/style.css` | password | the stylesheet |
 
@@ -96,6 +97,13 @@ a link to the original posting and the supporting quotes of each fact (in a clos
 element). It shows the mode used and every warning. The form is a plain HTML form that sends
 a `GET` request, so the page works without JavaScript and every search has a URL that can be
 bookmarked.
+
+### `GET /search`
+
+The simple page: one query box and the results, no filters. Without a query
+nothing is searched. It accepts only `query` (any other parameter is a 400)
+and runs the same search as `/` with every filter at its default. "All
+filters" and "Show more" lead to `/` with the query kept.
 
 ### `GET /runs`
 

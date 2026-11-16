@@ -553,3 +553,74 @@ def test_serve_with_a_password_may_listen_on_any_address(served, monkeypatch):
         {"host": "0.0.0.0", "port": 8000}
     ]
     assert cli.main(["serve", "--host", "0.0.0.0", "--no-auth"]) == 2  # the loopback rule wins
+
+
+# ---------- the simple search page ----------
+
+
+def test_simple_page_needs_the_password():
+    assert make_client(None).get("/search").status_code == 401
+
+
+def test_simple_page_without_a_query_shows_only_the_box_and_never_searches():
+    r = make_client(None).get("/search", headers=basic())  # no database behind it
+    assert r.status_code == 200
+    assert 'name="query"' in r.text and 'aria-label="Results"' not in r.text
+    assert "<script" not in r.text
+
+
+@pytest.mark.db
+def test_simple_page_searches_and_links_to_the_filters(conn, seed):
+    seed.add(title="Data Engineer", desc="Intro. Gute Deutschkenntnisse sind nötig. End.")
+    client = make_client(conn, QueryEmbedder(error=RuntimeError("down")))
+    r = client.get("/search", params={"query": "data"}, headers=basic())
+    assert r.status_code == 200
+    assert "Data Engineer" in r.text and 'value="data"' in r.text
+    assert 'href="/?query=data"' in r.text
+
+
+def test_simple_page_refuses_other_parameters():
+    r = make_client(None).get("/search", params={"canton": "ZH"}, headers=basic())
+    assert r.status_code == 400 and "only &#39;query&#39;" in r.text
+
+
+def test_simple_page_escapes_the_query():
+    r = make_client(None).get(
+        "/search", params={"canton": "x", "query": '"><script>x'}, headers=basic()
+    )
+    assert r.status_code == 400
+    assert "<script>x" not in r.text and "&lt;script&gt;x" in r.text
+
+
+def test_simple_page_with_a_blank_query_never_searches():
+    r = make_client(None).get("/search", params={"query": "   "}, headers=basic())
+    assert r.status_code == 200 and 'aria-label="Results"' not in r.text
+
+
+def test_simple_page_refuses_a_query_that_is_too_long():
+    r = make_client(None).get("/search", params={"query": "x" * 501}, headers=basic())
+    assert r.status_code == 400 and "longer than" in r.text
+
+
+@pytest.mark.db
+def test_simple_page_searches_the_text_it_shows_when_query_is_repeated(conn, seed):
+    seed.add(title="Data Engineer", desc="Builds pipelines.")
+    seed.add(title="Gardener", desc="Looks after plants.")
+    client = make_client(conn, QueryEmbedder(error=RuntimeError("down")))
+    # An empty last value must not turn the search into the unfiltered list of everything.
+    r = client.get("/search?query=data&query=", headers=basic())
+    assert r.status_code == 200 and 'value="data"' in r.text
+    assert "Data Engineer" in r.text and "Gardener" not in r.text
+    # Two values: the box shows both and both are searched (no posting has both words).
+    r = client.get("/search?query=data&query=gardener", headers=basic())
+    assert 'value="data gardener"' in r.text
+    assert 'href="/?query=data+gardener"' in r.text
+
+
+@pytest.mark.db
+def test_simple_page_offers_more_results_on_the_filters_page(conn, seed):
+    for i in range(21):
+        seed.add(title=f"data role {i}")
+    client = make_client(conn, QueryEmbedder(error=RuntimeError("down")))
+    html = client.get("/search", params={"query": "data"}, headers=basic()).text
+    assert "showing 20" in html and 'href="/?query=data&amp;limit=40"' in html

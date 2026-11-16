@@ -244,6 +244,11 @@ ats = "ashby"
 board_id = "odyssey"
 
 [[employer]]
+name = "Odyssey ML"
+ats = "ashby"
+board_id = "odysseyml"
+
+[[employer]]
 name = "First Principles"
 ats = "ashby"
 board_id = "firstprinciples"
@@ -525,6 +530,11 @@ ats = "personio"
 board_id = "auticon-swiss-ag"
 
 [[employer]]
+name = "Audi F1 Team"
+ats = "personio"
+board_id = "audif1"
+
+[[employer]]
 name = "Kaiko"
 ats = "teamtailor"
 board_id = "kaiko"
@@ -682,6 +692,13 @@ wd = "wd3"
 site = "Novartis_Careers"
 
 [[employer]]
+name = "Vontobel"
+ats = "workday"
+board_id = "vontobel"
+wd = "wd3"
+site = "Vontobel_External_Career"
+
+[[employer]]
 name = "Roche"
 ats = "workday"
 board_id = "roche"
@@ -823,3 +840,58 @@ name = "grape insurance"
 ats = "lever"
 board_id = "grape-health"
 eu = true
+
+[[employer]]
+name = "Rivia"
+ats = "ashby"
+board_id = "rivia"
+
+[[employer]]
+name = "Cerrion"
+ats = "teamtailor"
+board_id = "cerrion"
+url = "https://careers.cerrion.com/jobs.rss"
+
+[[employer]]
+name = "CoLab Software"
+ats = "greenhouse"
+board_id = "colabsoftware"
+
+[[employer]]
+name = "Flix"
+ats = "greenhouse"
+board_id = "flix"
+
+[[employer]]
+name = "Pliant"
+ats = "ashby"
+board_id = "pliant"
+
+[[employer]]
+name = "Sereact"
+ats = "ashby"
+board_id = "sereact"
+
+[[employer]]
+name = "RAI Institute"
+ats = "lever"
+board_id = "rai"
+
+[[employer]]
+name = "RIVR"
+ats = "lever"
+board_id = "rivr"
+
+[[employer]]
+name = "Accelleron"
+ats = "workday"
+board_id = "accelleron"
+wd = "wd3"
+site = "Accelleron"
+
+[[employer]]
+name = "Bose"
+ats = "workday"
+board_id = "boseallaboutme"
+wd = "wd503"
+site = "Bose_Careers"

@@ -273,9 +273,10 @@ def create_app(
             "embedding_model": model_id,
         }
 
-    def run_search(request: Request, evidence: bool):
-        """Parse, embed (no connection held), then search. Returns (parsed, result)."""
-        parsed = params.parse(request.query_params.multi_items())
+    def run_search(request: Request, evidence: bool, items=None):
+        """Parse, embed (no connection held), then search. Returns (parsed, result).
+        `items` replaces the request's own parameters when the caller has already reduced them."""
+        parsed = params.parse(request.query_params.multi_items() if items is None else items)
         plan = search.prepare(
             parsed.filters,
             parsed.mode,
@@ -331,6 +332,41 @@ def create_app(
             status = 502 if isinstance(error, search.EmbedError) else 400
             context["error"] = str(error)
         html = env.get_template("index.html").render(**context)
+        return HTMLResponse(html, status_code=status)
+
+    @app.get("/search", response_class=HTMLResponse)
+    def simple_page(request: Request):
+        """A search box only. Without a query nothing is searched; with one, the same search
+        as the main page runs with no filters. Only `query` is accepted here."""
+        items = request.query_params.multi_items()
+        query = " ".join(v for k, v in items if k == "query").strip()
+        context = {
+            "labels": EVIDENCE_LABELS,
+            "query": query,
+            "searched": bool(query),
+            "result": None,
+            "error": None,
+            "filters_url": "/?" + urlencode([("query", query)]) if query else "/",
+            "more_url": None,
+        }
+        status = 200
+        unknown = sorted({k for k, _ in items if k != "query"})
+        if unknown:
+            status = 400
+            context["error"] = f"unknown parameter '{unknown[0]}'; this page takes only 'query'"
+        elif query:
+            try:
+                # Search exactly the text the page shows, not the request's last `query` value.
+                parsed, result = run_search(request, evidence=True, items=[("query", query)])
+                context["result"] = result
+                limit = parsed.filters.limit
+                if result.total > len(result.hits) and limit < params.MAX_LIMIT:
+                    more = [("query", query), ("limit", str(min(limit * 2, params.MAX_LIMIT)))]
+                    context["more_url"] = "/?" + urlencode(more)
+            except search.SearchError as error:
+                status = 502 if isinstance(error, search.EmbedError) else 400
+                context["error"] = str(error)
+        html = env.get_template("simple.html").render(**context)
         return HTMLResponse(html, status_code=status)
 
     @app.get("/runs", response_class=HTMLResponse)

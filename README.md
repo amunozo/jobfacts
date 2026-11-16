@@ -26,11 +26,11 @@ the first thing to check, and today that means reading every posting.
 ## What works today
 
 - **Collection.** Reads the official public job-board APIs and feeds of about
-  100 employers (about 140 boards): Greenhouse, Lever, Ashby, SmartRecruiters,
+  165 employers (168 boards): Greenhouse, Lever, Ashby, SmartRecruiters,
   Recruitee, Workable, Personio, Teamtailor and Workday (sitemap and
   structured data only). Postings go into PostgreSQL; postings that disappear
-  are marked closed. A run on 4 November 2026 read 141 boards with 0 failures
-  (5,583 open postings). Each board is committed as it is read, so a crash
+  are marked closed. A run on 13 November 2026 read 166 of the 168 boards (2
+  failed: one answered 404, one answered empty) and left 6,475 open postings. Each board is committed as it is read, so a crash
   loses at most one board. See `docs/collector.md`.
 - **Relevance filter.** A cheap classifier model scores whether a posting is
   an AI, ML, data or research role from its title and first sentences. The
@@ -56,7 +56,8 @@ the first thing to check, and today that means reading every posting.
 - **HTTP API and search page (Milestone 2).** `jobfacts serve` starts a
   FastAPI service: `/api/search` returns the same results as `jobfacts search
   --json`, `/` is a server-rendered search page (filters, facts and their
-  supporting quotes, no JavaScript), `/health` reports the database state.
+  supporting quotes, no JavaScript), `/search` is a simpler page with only a
+  query box, `/health` reports the database state.
   Everything except `/health` sits behind a password (HTTP Basic). It runs on
   the author's machine; it is not deployed. See `docs/api.md`.
 - **Light monitoring (Milestone 2).** `jobfacts daily` records each run in a
@@ -91,9 +92,15 @@ the first thing to check, and today that means reading every posting.
 
 ## Measured accuracy
 
-Held-out set of 50 postings (25 English, 13 German, 12 French) that were not
-used while writing the prompts and rules (those were tuned on a separate
-100-posting test set). Run of 4 November 2026.
+Held-out set of 50 postings (25 English, 13 German, 12 French), drawn after the
+prompts and rules had been tuned on a separate 100-posting test set. Run of
+4 November 2026. Note: this run comes after three rule changes that were made
+from errors seen on this same set on 4 November (see `docs/decisions.md`,
+"Held-out rule questions"), so the set is no longer untouched and these numbers
+are somewhat optimistic. Before those changes the extracted fields (every row
+except `relevant`) scored between 92% and 100% overall (French requirement 92%,
+German requirement 94%, title level 94%). A new held-out set has not been
+drawn yet. The `relevant` row was measured at the earlier threshold of 0.4.
 
 | field | overall | en | de | fr |
 |---|---|---|---|---|

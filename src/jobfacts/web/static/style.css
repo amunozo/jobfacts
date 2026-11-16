@@ -146,3 +146,14 @@ blockquote { margin: 0 0 var(--space-1); padding-left: var(--space-3); border-le
   .site-header .wrap { flex-direction: column; gap: var(--space-1); }
   .site-header .nav { margin-left: 0; }
 }
+
+/* Simple search page: one box, results below */
+.site-header .nav ~ .nav { margin-left: var(--space-4); }
+.simple { padding: var(--space-6) 0; border-bottom: var(--border-1) solid var(--color-cloud); }
+.simple-home { padding: var(--space-12) 0; border-bottom: 0; max-width: 44rem; margin: 0 auto; }
+.simple-label { display: block; font-size: var(--text-l); font-weight: 600; margin-bottom: var(--space-3); }
+.simple-home .simple-label { font-size: var(--text-2xl); line-height: var(--heading-line-height); }
+.simple-row { display: flex; gap: var(--space-2); }
+.simple-row input { flex: 1; min-width: 0; font: inherit; font-size: var(--text-l); padding: var(--space-3) var(--space-4); border: var(--border-1) solid var(--color-metal); border-radius: var(--radius); }
+.simple-row input:focus { outline: var(--border-2) solid var(--color-red); outline-offset: 0; }
+.simple-hint { margin: var(--space-2) 0 0; font-size: var(--text-s); color: var(--color-iron); }
