@@ -30,8 +30,8 @@ the first thing to check, and today that means reading every posting.
   Recruitee, Workable, Personio, Teamtailor and Workday (sitemap and
   structured data only). Postings go into PostgreSQL; postings that disappear
   are marked closed. A run on 13 November 2026 read 166 of the 168 boards (2
-  failed: one answered 404, one answered empty) and left 6,475 open postings. Each board is committed as it is read, so a crash
-  loses at most one board. See `docs/collector.md`.
+  failed: one answered 404, one answered empty) and left 6,462 open postings.
+  Each board is committed as it is read, so a crash loses at most one board. See `docs/collector.md`.
 - **Relevance filter.** A cheap classifier model scores whether a posting is
   an AI, ML, data or research role from its title and first sentences. The
   threshold (0.2) favours recall: a wrong row costs seconds, a missed job
@@ -176,7 +176,7 @@ API key; relevance and extraction need `TYPESAFE_API_KEY`.
 uv run ruff check . && uv run ruff format --check . && uv run pytest
 ```
 
-About 500 tests; the database tests use the compose database and are skipped
+About 900 tests; the database tests use the compose database and are skipped
 locally when it is not running. GitHub Actions runs the same checks, with a
 PostgreSQL service, on every push and pull request; there the database tests
 fail instead of being skipped. A last step runs the accuracy gate

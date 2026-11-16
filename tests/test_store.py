@@ -175,3 +175,15 @@ def test_repair_html_entities_is_idempotent_and_limited_to_workday(conn):
     assert conn.execute("SELECT title FROM postings WHERE source_job_id = 'l1'").fetchone() == (
         "Ops &amp; Data",
     )
+
+
+def test_the_test_schema_is_locked_while_a_test_uses_it(conn):
+    """A second pytest process must wait, not drop the schema under a running test."""
+    from conftest import SCHEMA_LOCK
+
+    other = second_connection(conn)
+    try:
+        got = other.execute("SELECT pg_try_advisory_lock(%s)", (SCHEMA_LOCK,)).fetchone()[0]
+        assert got is False
+    finally:
+        other.close()

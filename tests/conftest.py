@@ -5,6 +5,8 @@ import pytest
 
 from jobfacts import db
 
+SCHEMA_LOCK = 5433_2026  # any fixed number; names the advisory lock that guards the test schema
+
 
 @pytest.fixture
 def conn():
@@ -17,6 +19,11 @@ def conn():
             pytest.fail(f"PostgreSQL unreachable in CI ({error})")
         pytest.skip(f"PostgreSQL unreachable ({error}); run `docker compose up -d`")
     schema = "test_jobfacts"
+    # One test at a time across processes. Every test drops and recreates this schema; if a
+    # second pytest process did that in the middle of a test here, this test's statements
+    # would fall through to `public` (the real tables). The lock lasts until the connection
+    # closes; a second process waits for it instead.
+    connection.execute("SELECT pg_advisory_lock(%s)", (SCHEMA_LOCK,))
     connection.execute(f"DROP SCHEMA IF EXISTS {schema} CASCADE")
     connection.execute(f"CREATE SCHEMA {schema}")
     # public stays on the path: the pgvector extension (type `vector`) may live there

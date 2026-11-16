@@ -686,3 +686,28 @@ Newest at the bottom.
   is not deterministic, so the gate would fail at random); a private self-hosted
   runner holding the data (a machine to keep running and secure for one check, and it
   is not reproducible by anyone reading the repository).
+
+## 2026-11-16: A simple search page next to the filter page
+- **What:** `/search` shows one query box and the results. It accepts only
+  `query`, searches exactly the text shown in the box, and links to `/` (the
+  filter page) for filters and for more than 20 results.
+- **Why:** most searches start as a few words; the filter form is the second
+  step, not the first. Both pages call the same search function, so they
+  cannot disagree.
+- **Rejected:** hiding the filters on `/` behind a toggle (needs JavaScript or
+  a second form state); accepting filter parameters on `/search` (two pages
+  doing the same job).
+
+## 2026-11-16: One test at a time on the shared test schema (advisory lock)
+- **What:** the database test fixture takes a PostgreSQL advisory lock (a
+  named lock that sessions agree on; it guards no table by itself) before it
+  drops and recreates the test schema, and holds it until the test ends.
+- **Why:** every test recreates the schema `test_jobfacts`, and the
+  connection's search path ends in `public` because the pgvector type lives
+  there. When two pytest processes overlapped, one dropped the schema in the
+  middle of the other's test, whose statements then landed in the real tables
+  in `public`. This happened once on 8 November and left invented rows in the
+  local database. With the lock a second process waits its turn.
+- **Rejected:** a schema per process (several tests open second connections
+  to the schema by name); taking `public` off the search path (the migrations
+  name the `vector` type without a schema).
