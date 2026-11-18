@@ -1,10 +1,12 @@
-"""Reference labels of the test set: the majority of three model labellers, plus owner review.
+"""Reference labels of a set: the majority of the panel of model labellers, plus owner review.
 
-`combine` reads the stored answers of gpt, gemini_or and opus (see `jobfacts.silver`) and writes
+The panel is three labellers by default (gpt, gemini_or, opus); a set that only has complete
+answers from two (gpt, opus) uses a panel of two, where every disagreement is a split.
+`combine` reads the stored answers of the panel (see `jobfacts.silver`) and writes
 `data/private/reference_labels.jsonl`, one record per posting in the shape of an owner label
 (`jobfacts.labels`) with extra keys: `support`, `votes`, `low_confidence`, `splits`, `reviewed`.
-A key where no two labellers agree has value null (evaluation skips null keys) until the owner
-decides it. The owner reviews the split keys and a random audit sample of unanimous keys
+A key with no majority has value null (evaluation skips null keys) until the owner decides it.
+The owner reviews the split keys and a random audit sample of unanimous keys
 (`review_sheet`, `review_apply`); the audit gives the error rate of the reference.
 """
 
@@ -54,15 +56,29 @@ def _plain(value: Any) -> Any:
     return list(value) if isinstance(value, tuple) else value
 
 
+def validate_panel(panel: tuple[str, ...] | list[str]) -> tuple[str, ...]:
+    """The panel as a tuple, or ValueError: at least 2 distinct names, each a known labeller."""
+    names = tuple(panel)
+    if len(names) < 2:
+        raise ValueError(f"a panel needs at least 2 labellers, got {list(names)}")
+    dupes = sorted({n for n in names if names.count(n) > 1})
+    if dupes:
+        raise ValueError(f"panel names must be distinct, repeated: {dupes}")
+    unknown = [n for n in names if n not in silver.LABELLERS]
+    if unknown:
+        raise ValueError(f"unknown labellers {unknown}; known: {sorted(silver.LABELLERS)}")
+    return names
+
+
 def vote(values: dict[str, Any]) -> tuple[Any, str]:
     """(majority value or None, support) over the panel's comparable values.
 
-    Support is "3/3" (all agree), "2/3" (a majority) or "split" (value None)."""
+    With n labellers support is "n/n" (all agree), "k/n" (a value held by more than half of
+    them, so "2/3" for three) or "split" (value None)."""
+    n = len(values)
     top, count = Counter(values.values()).most_common(1)[0]
-    if count == len(values):
-        return top, f"{count}/{len(values)}"
-    if count >= 2:
-        return top, f"{count}/{len(values)}"
+    if count == n or 2 * count > n:
+        return top, f"{count}/{n}"
     return None, "split"
 
 
@@ -70,17 +86,20 @@ def _dir(data_dir: Path) -> Path:
     return Path(data_dir) / "silver"
 
 
-def load_panel(data_dir: Path, pids: list[int]) -> tuple[dict[str, dict[int, dict]], list[int]]:
+def load_panel(
+    data_dir: Path, pids: list[int], panel: tuple[str, ...] = PANEL
+) -> tuple[dict[str, dict[int, dict]], list[int]]:
     """Stored records per panel labeller, and the posting ids that lack an answer from any."""
-    answers: dict[str, dict[int, dict]] = {lab: {} for lab in PANEL}
+    panel = validate_panel(panel)
+    answers: dict[str, dict[int, dict]] = {lab: {} for lab in panel}
     missing: list[int] = []
     for pid in pids:
         recs = {}
-        for lab in PANEL:
+        for lab in panel:
             path = _dir(data_dir) / lab / f"{pid}.json"
             if path.exists():
                 recs[lab] = json.loads(path.read_text(encoding="utf-8"))
-        if len(recs) < len(PANEL):
+        if len(recs) < len(panel):
             missing.append(pid)
             continue
         for lab, rec in recs.items():
@@ -135,11 +154,13 @@ def check_value(key: str, value: Any) -> str | None:
 # ----- combine --------------------------------------------------------------------------
 
 
-def _chosen(key: str, value: Any, answers: dict[str, dict]) -> tuple[str | None, dict | None]:
+def _chosen(
+    key: str, value: Any, answers: dict[str, dict], panel: tuple[str, ...] = PANEL
+) -> tuple[str | None, dict | None]:
     """Labeller whose answer gives the sentences for `value`: Opus if it agrees, else the first
     labeller (panel order) that does."""
     agreeing = [
-        lab for lab in PANEL if lab in answers and _cmp(answers[lab]["answer"], key) == value
+        lab for lab in panel if lab in answers and _cmp(answers[lab]["answer"], key) == value
     ]
     if not agreeing:
         return None, None
@@ -148,7 +169,10 @@ def _chosen(key: str, value: Any, answers: dict[str, dict]) -> tuple[str | None,
 
 
 def combine_posting(
-    item: dict, recs: dict[str, dict], decisions: dict[tuple[int, str], dict]
+    item: dict,
+    recs: dict[str, dict],
+    decisions: dict[tuple[int, str], dict],
+    panel: tuple[str, ...] = PANEL,
 ) -> dict:
     """Reference record of one posting from the panel's stored records."""
     pid = item["posting_id"]
@@ -176,7 +200,7 @@ def combine_posting(
         sents: list[int] = []
         translation = ""
         if value is not None and key != "relevant":
-            _, entry = _chosen(key, value, answers)
+            _, entry = _chosen(key, value, answers, panel)
             sents, translation = list(entry["sentences"]), entry.get("translation", "")
         decision = decisions.get((pid, key))
         if decision and (decision["verdict"] == "wrong" or value is None):
@@ -185,7 +209,7 @@ def combine_posting(
                 comparable = tuple(sorted(new)) if key == OFFICE_CANTONS else new
                 value, sents, translation = comparable, [], ""
                 if key != "relevant":
-                    _, entry = _chosen(key, comparable, answers)
+                    _, entry = _chosen(key, comparable, answers, panel)
                     if entry:
                         sents, translation = list(entry["sentences"]), entry.get("translation", "")
                 reviewed[key] = "decided" if sup == "split" else "corrected"
@@ -209,7 +233,7 @@ def combine_posting(
     return {
         "posting_id": pid,
         "labeller": "silver",
-        "models": {lab: silver.LABELLERS[lab] for lab in PANEL},
+        "models": {lab: recs[lab].get("model", silver.LABELLERS[lab]) for lab in panel},
         "saved_at": datetime.now(UTC).isoformat(timespec="seconds"),
         "relevant": values["relevant"],
         "fields": fields,
@@ -227,21 +251,22 @@ def combine_posting(
     }
 
 
-def combine(data_dir: Path, set_name: str = "all") -> dict:
-    """Write `reference_labels.jsonl` for the postings all three labellers answered.
+def combine(data_dir: Path, set_name: str = "all", panel: tuple[str, ...] = PANEL) -> dict:
+    """Write `reference_labels.jsonl` for the postings all panel labellers answered.
 
     Returns a summary: postings written, missing, unresolved splits and support counts."""
+    panel = validate_panel(panel)
     data_dir = Path(data_dir)
     items = silver.items_for(data_dir, set_name)
-    answers, missing = load_panel(data_dir, [i["posting_id"] for i in items])
+    answers, missing = load_panel(data_dir, [i["posting_id"] for i in items], panel)
     decisions = load_decisions(data_dir, set_name)
     records = []
     for item in items:
         pid = item["posting_id"]
         if pid in missing:
             continue
-        recs = {lab: answers[lab][pid] for lab in PANEL}
-        records.append(combine_posting(item, recs, decisions))
+        recs = {lab: answers[lab][pid] for lab in panel}
+        records.append(combine_posting(item, recs, decisions, panel))
     out = data_dir / reference_file(set_name)
     out.parent.mkdir(parents=True, exist_ok=True)
     with out.open("w", encoding="utf-8") as f:
@@ -269,6 +294,20 @@ def load_reference(data_dir: Path, set_name: str = "all") -> dict[int, dict]:
     return out
 
 
+def reference_panel(data_dir: Path, set_name: str = "all") -> tuple[str, ...] | None:
+    """Labellers the stored reference of a set was combined with (the `models` of its first
+    record, in their stored order), or None when there is no reference or it has no records."""
+    for rec in load_reference(data_dir, set_name).values():
+        return tuple(rec.get("models") or PANEL)
+    return None
+
+
+def describe_panel(panel: tuple[str, ...]) -> str:
+    """ "two model labellers (gpt, opus)": how many and which, for report headers."""
+    words = {2: "two", 3: "three", 4: "four"}
+    return f"{words.get(len(panel), len(panel))} model labellers ({', '.join(panel)})"
+
+
 # ----- review sheet ---------------------------------------------------------------------
 
 
@@ -287,12 +326,19 @@ def _show(value: Any) -> str:
     return str(value)
 
 
-def render_item(number: int, kind: str, item: dict, key: str, recs: dict[str, dict]) -> str:
+def render_item(
+    number: int,
+    kind: str,
+    item: dict,
+    key: str,
+    recs: dict[str, dict],
+    panel: tuple[str, ...] = PANEL,
+) -> str:
     pt = PostingText.build(
         item["posting_id"], item["title"], item["location_raw"], item["description_text"]
     )
     groups: dict[Any, list[str]] = {}
-    for lab in PANEL:
+    for lab in panel:
         groups.setdefault(_cmp(recs[lab]["answer"], key), []).append(lab)
     head = (
         f"### {number}. [{kind}] posting {item['posting_id']} - {item['language']} - "
@@ -324,15 +370,30 @@ def render_item(number: int, kind: str, item: dict, key: str, recs: dict[str, di
     return "\n".join(lines)
 
 
-def review_sheet(data_dir: Path, set_name: str = "all", audit: int = AUDIT_SIZE) -> dict:
+def review_sheet(
+    data_dir: Path, set_name: str = "all", audit: int = AUDIT_SIZE, panel: tuple[str, ...] = PANEL
+) -> dict:
     """Write `silver/review_sheet.md`: unresolved split keys plus an audit sample.
+
+    Raises ValueError (writing nothing) when the set's reference file already exists and was
+    combined with other labellers than `panel`.
 
     Items already handed out and still undecided stay on the sheet with their number. A new
     audit sample (seed `AUDIT_SEED`, uniform over unanimous (posting, key) pairs not on any
     earlier sheet) is drawn only when no earlier audit item is waiting for a decision."""
+    panel = validate_panel(panel)
     data_dir = Path(data_dir)
+    used = {
+        frozenset(r.get("models") or PANEL) for r in load_reference(data_dir, set_name).values()
+    }
+    if used and used != {frozenset(panel)}:
+        was = reference_panel(data_dir, set_name)
+        raise ValueError(
+            f"the reference of set {set_name} was combined with the panel {', '.join(was)}, "
+            f"not {', '.join(panel)}: use --panel {','.join(was)} or run `combine` again"
+        )
     items = {i["posting_id"]: i for i in silver.items_for(data_dir, set_name)}
-    answers, _ = load_panel(data_dir, list(items))
+    answers, _ = load_panel(data_dir, list(items), panel)
     decisions = load_decisions(data_dir, set_name)
     issued = load_issued(data_dir, set_name)
     seen = {(i["posting_id"], i["key"]) for i in issued}
@@ -342,15 +403,15 @@ def review_sheet(data_dir: Path, set_name: str = "all", audit: int = AUDIT_SIZE)
     def pending(entry: dict) -> bool:
         return (entry["posting_id"], entry["key"]) not in decisions
 
-    complete = [pid for pid in items if all(pid in answers[lab] for lab in PANEL)]
+    complete = [pid for pid in items if all(pid in answers[lab] for lab in panel)]
     splits, unanimous = [], []
     for pid in complete:
-        recs = {lab: answers[lab][pid] for lab in PANEL}
+        recs = {lab: answers[lab][pid] for lab in panel}
         for key in KEYS:
             _, sup = vote({lab: _cmp(r["answer"], key) for lab, r in recs.items()})
             if sup == "split":
                 splits.append((pid, key))
-            elif sup == "3/3":
+            elif sup == f"{len(panel)}/{len(panel)}":
                 unanimous.append((pid, key))
     new: list[dict] = []
     for pid, key in splits:
@@ -371,18 +432,23 @@ def review_sheet(data_dir: Path, set_name: str = "all", audit: int = AUDIT_SIZE)
     path.write_text(json.dumps({"items": issued + new}, indent=1) + "\n", encoding="utf-8")
     n_split = sum(i["kind"] == "split" for i in on_sheet)
     n_audit = len(on_sheet) - n_split
+    size = len(panel)
+    no_majority = {2: "the two labellers disagree", 3: "no two labellers agree"}.get(
+        size, "no value has a majority"
+    )
+    everyone = {2: "both agree", 3: "all three agree"}.get(size, f"all {size} agree")
     lines = [
         f"# Review sheet {sheet_no}",
         "",
-        f"{len(on_sheet)} items: {n_split} split keys (no two labellers agree: choose the value) "
-        f"and {n_audit} audit keys (all three agree: say ok, or give the right value).",
+        f"{len(on_sheet)} items: {n_split} split keys ({no_majority}: choose the value) "
+        f"and {n_audit} audit keys ({everyone}: say ok, or give the right value).",
         "Reply per item number, for example `3 ok`, `4 wrong stationary`, `5 hybrid`.",
         "",
     ]
     for entry in on_sheet:
         item = items[entry["posting_id"]]
-        recs = {lab: answers[lab][entry["posting_id"]] for lab in PANEL}
-        lines.append(render_item(entry["item"], entry["kind"], item, entry["key"], recs))
+        recs = {lab: answers[lab][entry["posting_id"]] for lab in panel}
+        lines.append(render_item(entry["item"], entry["kind"], item, entry["key"], recs, panel))
         lines.append("")
     out = _dir(data_dir) / _suffixed(SHEET_FILE, set_name)
     out.write_text("\n".join(lines), encoding="utf-8")

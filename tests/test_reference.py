@@ -18,12 +18,12 @@ def data_dir(tmp_path):
     return tmp_path
 
 
-def store_all(data_dir, edits=None):
-    """Store an answer of each panel labeller for every posting. `edits[(lab, pid)]` is a
-    function that changes the answer (a deep copy of the valid one)."""
+def store_all(data_dir, edits=None, labellers=None):
+    """Store an answer of each panel labeller (or of `labellers`) for every posting.
+    `edits[(lab, pid)]` is a function that changes the answer (a deep copy of the valid one)."""
     edits = edits or {}
     for item in silver.items_for(data_dir, "all"):
-        for lab in reference.PANEL:
+        for lab in labellers or reference.PANEL:
             a = copy.deepcopy(valid_for(item))
             if (lab, item["posting_id"]) in edits:
                 edits[(lab, item["posting_id"])](a)
@@ -320,3 +320,205 @@ def test_reference_vs_owner_agreement():
     out = ev.reference_vs_owner(ref, own)
     assert out["work_mode"] == [1, 2] and out["office_cantons"] == [2, 2]
     assert out["relevant"] == [1, 2] and out["german"] == [0, 0]
+
+
+# ----- a panel of two labellers ---------------------------------------------------------
+
+TWO = ("gpt", "opus")
+
+
+def store_two(data_dir, edits=None):
+    """gpt and opus answer every posting; gemini_or has no answers at all."""
+    store_all(data_dir, edits, labellers=TWO)
+
+
+def two_split_data(data_dir):
+    store_two(
+        data_dir,
+        {
+            ("gpt", 1): set_value("min_years", "1", ["S001"]),
+            ("opus", 1): set_value("min_years", "3", ["S003"]),
+        },
+    )
+
+
+def test_vote_for_three_is_unchanged_and_for_two_is_agree_or_split():
+    assert reference.vote({"a": "x", "b": "x", "c": "x"}) == ("x", "3/3")
+    assert reference.vote({"a": "x", "b": "x", "c": "y"}) == ("x", "2/3")
+    assert reference.vote({"a": "x", "b": "y", "c": "z"}) == (None, "split")
+    assert reference.vote({"a": "x", "b": "x"}) == ("x", "2/2")
+    assert reference.vote({"a": "x", "b": "y"}) == (None, "split")
+    # four labellers: a strict majority is needed, two against two is a split
+    assert reference.vote({"a": "x", "b": "x", "c": "x", "d": "y"}) == ("x", "3/4")
+    assert reference.vote({"a": "x", "b": "x", "c": "y", "d": "y"}) == (None, "split")
+
+
+def test_combine_with_two_labellers_and_no_third_answer(data_dir):
+    two_split_data(data_dir)
+    assert not (data_dir / "silver" / "gemini_or").exists()
+    s = reference.combine(data_dir, "all", TWO)
+    assert s["written"] == 40 and s["missing"] == [] and s["unresolved"] == {1: ["min_years"]}
+    assert s["support"]["2/2"] == 40 * len(reference.KEYS) - 1 and s["support"]["split"] == 1
+    recs = by_pid(data_dir)
+    r1, r2 = recs[1], recs[2]
+    assert list(r1["models"]) == list(TWO) == list(r2["models"])
+    assert r1["support"]["min_years"] == "split" and r1["splits"] == ["min_years"]
+    assert r1["fields"]["min_years"]["value"] is None
+    assert r1["votes"]["min_years"] == {"gpt": "1", "opus": "3"}
+    assert r2["support"]["work_mode"] == "2/2" and r2["splits"] == []
+    assert r2["fields"]["min_years"]["value"] == "3"
+
+
+def test_two_labeller_sentences_come_from_opus(data_dir):
+    store_two(
+        data_dir,
+        {
+            ("gpt", 1): set_value("min_years", "3", ["S001"]),
+            ("opus", 1): set_value("min_years", "3", ["S003"]),
+        },
+    )
+    reference.combine(data_dir, "all", TWO)
+    assert by_pid(data_dir)[1]["fields"]["min_years"]["sentences"] == [3]
+
+
+def test_default_panel_reports_missing_when_gemini_or_has_no_answer(data_dir):
+    store_two(data_dir)
+    s = reference.combine(data_dir, "all")
+    assert s["written"] == 0 and s["missing"] == list(range(1, 41))
+
+
+def test_review_sheet_for_two_labellers_and_decision_round_trip(data_dir):
+    two_split_data(data_dir)
+    reference.combine(data_dir, "all", TWO)
+    s = reference.review_sheet(data_dir, "all", panel=TWO)
+    assert s["splits"] == 1 and s["audit"] == 30 and s["incomplete"] == 0
+    items = read_items(data_dir)
+    assert items[0]["kind"] == "split" and (items[0]["posting_id"], items[0]["key"]) == (
+        1,
+        "min_years",
+    )
+    audit = [i for i in items if i["kind"] == "audit"]
+    assert len(audit) == 30
+    recs = by_pid(data_dir)
+    assert all(recs[i["posting_id"]]["support"][i["key"]] == "2/2" for i in audit)
+    text = (data_dir / "silver" / "review_sheet.md").read_text()
+    assert "the two labellers disagree" in text and "both agree" in text
+    top = text.split("### 1.")[0]  # the header (posting texts may say "three")
+    assert "three" not in top and "no two labellers" not in top
+    item1 = text.split("### 1. ")[1].split("###")[0]
+    assert "**1** (gpt)" in item1 and "**3** (opus)" in item1
+
+    decisions = data_dir / "d.jsonl"
+    decisions.write_text(json.dumps({"item": 1, "verdict": "ok", "value": "3"}))
+    reference.review_apply(data_dir, decisions)
+    reference.combine(data_dir, "all", TWO)
+    r1 = by_pid(data_dir)[1]
+    assert r1["fields"]["min_years"]["value"] == "3" and r1["splits"] == []
+    assert r1["fields"]["min_years"]["sentences"] == [3]  # sentences of the labeller with "3"
+    assert r1["reviewed"] == {"min_years": "decided"}
+
+
+def test_review_sheet_refuses_a_different_panel_than_the_reference(data_dir):
+    two_split_data(data_dir)
+    reference.combine(data_dir, "all", TWO)
+    with pytest.raises(ValueError, match="gpt, opus"):
+        reference.review_sheet(data_dir, "all")  # default three-labeller panel
+    assert not (data_dir / "silver" / "review_sheet.md").exists()
+    assert not (data_dir / "silver" / "review_items.json").exists()
+    # the other way round: a three-labeller reference and a two-labeller sheet
+    store_all(data_dir)
+    reference.combine(data_dir, "all")
+    with pytest.raises(ValueError, match="gpt, gemini_or, opus"):
+        reference.review_sheet(data_dir, "all", panel=TWO)
+    assert not (data_dir / "silver" / "review_sheet.md").exists()
+    # without a reference file there is nothing to contradict
+    (data_dir / reference.REFERENCE_FILE).unlink()
+    assert reference.review_sheet(data_dir, "all", audit=1, panel=TWO)["audit"] == 1
+
+
+@pytest.mark.parametrize(
+    "panel, message",
+    [
+        (("gpt",), "at least 2"),
+        ((), "at least 2"),
+        (("gpt", "nobody"), "unknown labellers"),
+        (("gpt", "gpt"), "distinct"),
+        (("gpt", "opus", "opus"), "distinct"),
+    ],
+)
+def test_invalid_panels_raise(data_dir, panel, message):
+    store_two(data_dir)
+    for call in (
+        lambda: reference.validate_panel(panel),
+        lambda: reference.combine(data_dir, "all", panel),
+        lambda: reference.review_sheet(data_dir, "all", panel=panel),
+        lambda: reference.load_panel(data_dir, [1], panel),
+    ):
+        with pytest.raises(ValueError, match=message):
+            call()
+    assert not (data_dir / reference.REFERENCE_FILE).exists()
+
+
+def test_cli_panel_option(data_dir, capsys):
+    from jobfacts import cli
+
+    two_split_data(data_dir)
+    base = ["silver", "--set", "all", "--data-dir", str(data_dir)]
+    assert cli.main([*base[:1], "combine", *base[1:], "--panel", "gpt,opus"]) == 0
+    out = capsys.readouterr().out
+    assert "2/2" in out and "not yet answered" not in out
+    assert cli.main(["silver", "review-sheet", *base[1:], "--panel", "gpt,opus"]) == 0
+    capsys.readouterr()
+    # a different panel than the reference: refused with the panel of the reference named
+    assert cli.main(["silver", "review-sheet", *base[1:]]) == 2
+    assert "gpt, opus" in capsys.readouterr().out
+    for bad in ("gpt", "gpt,nobody", "gpt,gpt", ""):
+        assert cli.main(["silver", "combine", *base[1:], "--panel", bad]) == 2
+        assert cli.main(["silver", "review-sheet", *base[1:], "--panel", bad]) == 2
+        capsys.readouterr()
+    # the default panel is the three-labeller one: gemini_or has no answers, so all are missing
+    assert cli.main(["silver", "combine", *base[1:]]) == 0
+    assert "not yet answered by all labellers of the panel (gpt, gemini_or, opus)" in (
+        capsys.readouterr().out
+    )
+
+
+def test_evaluate_header_names_the_labellers_of_the_reference(data_dir):
+    two_split_data(data_dir)
+    reference.combine(data_dir, "all", TWO)
+    panel = reference.reference_panel(data_dir, "all")
+    assert panel == TWO
+
+    def ext():
+        return {"error": None, "values": {n: next(iter(f.values)) for n, f in ev.FIELDS.items()},
+                "sentences": {}, "office_cantons": ["BS"],
+                "office_cantons_sentences": [], "office_places": [], "details": {},
+                "cost_usd": 0, "latency_ms": 1, "tokens_in": 1, "tokens_out": 1}  # fmt: skip
+
+    item = {"posting_id": 1, "language": "en", "group": "g", "origin": "board", "order": 0}
+    ref = by_pid(data_dir)[1]
+    text = ev.build_report([item], {1: ref}, {"m": {1: ext()}}, {"m": {}}, {1: 0.9}, "d",
+                           "silver", "Audit: x.", {}, "all", panel)  # fmt: skip
+    header = next(line for line in text.splitlines() if line.startswith("**Reference"))
+    assert "two model labellers (gpt, opus)" in header and "owner decides" in header
+    assert "three" not in header.lower() and "three" not in text.lower().split("## 1.")[0]
+    assert "three" not in text.split("- The reference is")[1].split("\n")[0].lower()
+    # the default (no panel given) still describes the usual three
+    text3 = ev.build_report([item], {1: ref}, {"m": {1: ext()}}, {"m": {}}, {1: 0.9}, "d",
+                            "silver", "Audit: x.", {})  # fmt: skip
+    assert "three model labellers (gpt, gemini_or, opus)" in text3
+
+
+def test_silver_report_with_two_complete_labellers_and_a_partial_third(data_dir):
+    from jobfacts import silver_report
+
+    two_split_data(data_dir)
+    item = silver.items_for(data_dir, "all")[0]
+    silver._store(data_dir, "gemini_or", item, silver.validate(valid_for(item), item), "sha")
+    text, summary = silver_report.build_report(data_dir, "all")
+    assert summary["labellers"] == ["gpt", "opus"] and summary["missing"] == ["gemini", "gemini_or"]
+    assert "Labellers compared: gpt, opus." in text
+    assert "| gpt - opus |" in text and "gemini_or" in text
+    assert 0 < summary["all_agree"] < 1
+    assert "1/40 answers" in text  # the partly answered labeller in the validation table
+    assert "both labellers agree" not in text  # no audit yet: the sentence is not printed

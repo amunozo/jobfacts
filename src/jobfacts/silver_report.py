@@ -307,17 +307,31 @@ def build_report(
     return "\n".join(lines), summary
 
 
+def _split_words(n: int) -> str:
+    return {2: "the two labellers disagree", 3: "no two labellers agree"}.get(
+        n, "no value has a majority"
+    )
+
+
+def _all_words(n: int) -> str:
+    return {2: "both labellers agree", 3: "all three labellers agree"}.get(
+        n, f"all {n} labellers agree"
+    )
+
+
 def _audit_section(data_dir: Path, summary: dict) -> list[str]:
     """Owner audit of unanimous answers (error rate of the reference) and split resolution."""
     from jobfacts import reference
 
-    stats = reference.audit_stats(data_dir, summary.get("set", "all"))
+    set_name = summary.get("set", "all")
+    stats = reference.audit_stats(data_dir, set_name)
+    panel = reference.reference_panel(data_dir, set_name) or reference.PANEL
     lines = ["## 7. Audit of the reference", ""]
     k, n = stats["correct"], stats["audited"]
     summary["audit"] = {"correct": k, "audited": n, **{
         x: stats[x] for x in ("splits", "splits_resolved")}}  # fmt: skip
     lines.append(
-        f"Split keys (no two labellers agree) handed to the owner: {stats['splits']}, "
+        f"Split keys ({_split_words(len(panel))}) handed to the owner: {stats['splits']}, "
         f"resolved: {stats['splits_resolved']}.\n"
     )
     if not n:
@@ -332,7 +346,7 @@ def _audit_section(data_dir: Path, summary: dict) -> list[str]:
         rows.append([key, f"{cell_[0]} of {cell_[1]}", pct(*cell_),
                      f"{100 * lo:.0f}-{100 * hi:.0f}%"])  # fmt: skip
     lines.append(
-        "Unanimous answers (all three labellers agree) drawn at random and checked by the "
+        f"Unanimous answers ({_all_words(len(panel))}) drawn at random and checked by the "
         "owner. The interval is a 95% Wilson interval for the share correct; per-field rows "
         "have small n.\n"
     )

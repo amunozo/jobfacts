@@ -152,9 +152,11 @@ Response 422, nothing written: `{"errors": {"min_years": "unknown sentence ids [
 Silver labels for test-set postings: several models label each posting independently with
 the prompt template `prompts/label_posting.md` (language-neutral; the field guide in it is
 `docs/fields.md`). Combining the answers into final labels is a separate step. No command
-here needs the database. Labellers: `gpt` (GPT-6 Astra, pi), `gemini` (Gemini 4 Argon via
-opencode-go, pi), `gemini_or` (Gemini 4 Argon called directly through OpenRouter, max 16000
+here needs the database. Labellers: `gpt` (GPT-6.2 Sol, pi), `gemini` (Gemini 4 Argon via
+opencode-go, pi), `gemini_or` (Gemini 4 Carbon called directly through OpenRouter, max 16000
 output tokens, thinking effort high) and `opus` (answers written by a Claude Code subagent).
+Until 18 November 2026 `gpt` was GPT-6 Astra and `gemini_or` was Gemini 4 Argon: the test set
+and the first held-out set were labelled by those; each stored answer names its model.
 
 Item sets (`--set`, default `pilot`): `pilot` = 12 postings (the first 4 by `order` of each of
 en, de, fr; the English ones include order 0, which the owner labelled), written by
@@ -203,24 +205,39 @@ The reference for scoring the extractors is the majority of three labellers: `gp
 (`data/private/labels.jsonl`) are kept as a human comparison.
 
 ```
-uv run jobfacts silver combine --set all        # -> data/private/reference_labels.jsonl
-uv run jobfacts silver review-sheet [--audit N] # -> data/private/silver/review_sheet.md
+uv run jobfacts silver combine --set all [--panel gpt,opus]   # -> data/private/reference_labels.jsonl
+uv run jobfacts silver review-sheet [--audit N] [--panel gpt,opus]  # -> data/private/silver/review_sheet.md
 uv run jobfacts silver review-apply FILE        # store the owner's decisions
 uv run jobfacts evaluate [--reference silver|owner]   # default silver
 ```
 
-`combine` writes one record per posting that all three labellers answered, in the shape of
+`--panel` gives the labellers of the reference, comma-separated, in order; the default is
+`gpt,gemini_or,opus`. A panel needs at least two different labellers from the list above;
+otherwise the command prints the problem and exits with code 2. `review-sheet` refuses (exit
+code 2, nothing written) when the set's reference file was combined with other labellers than
+the panel given, and the message names the panel of the reference.
+
+`combine` writes one record per posting that all panel labellers answered, in the shape of
 an owner label (`fields: {name: {value, sentences}}`, `office_cantons`,
 `office_cantons_sentences`, `office_places` filled by code for the cantons, `relevant`),
 `labeller: "silver"` and `models`, plus per key:
 
-- `support`: `3/3`, `2/3` or `split`. Majority = at least two equal answers
-  (`office_cantons` compared as a set).
+- `support`: `3/3`, `2/3` or `split` (`2/2` or `split` for a panel of two). Majority = at
+  least two equal answers of three (`office_cantons` compared as a set).
 - `votes`: each labeller's value; `low_confidence`: the labellers that marked the key low.
 - Sentences come from Opus when Opus is in the majority, otherwise from the first majority
   labeller (order gpt, gemini_or). A split key has value `null` (and `splits` lists it).
   Evaluation skips null keys, so `n` differs per field until the owner has decided them.
 - `reviewed`: keys decided or checked by the owner (`decided`, `corrected`, `confirmed`).
+- `models`: exactly the labellers of the panel.
+
+Two labellers only: a set may have complete answers from just two labellers (the second
+held-out set has `gpt` and `opus`). Use `--panel gpt,opus` for `combine` and `review-sheet`.
+Where the two agree, the key has that value and support `2/2`. Where they disagree, the key is
+a split with value `null`, and the owner decides it on the review sheet. A third labeller is
+what turns most of those disagreements into a `2/3` majority instead. The audit sample is
+drawn from the `2/2` keys, `evaluate` names the labellers of the reference in its header, and
+`silver report` compares the labellers that answered every posting of the set.
 
 Owner review is done in chat, without a terminal UI. `review-sheet` writes numbered items:
 every unresolved split key, plus an audit sample of 30 unanimous (posting, key) pairs,
@@ -256,7 +273,7 @@ postings that were never used for tuning, labelled by the same three-model major
 accuracy can be reported fairly. Everything is under `data/private/` (git-ignored).
 
 ```
-uv run jobfacts select-holdout [--n 50] [--force]   # -> holdout_set.jsonl + holdout_set.meta.json
+uv run jobfacts select-holdout [--n 50] [--force] [--seed N] [--exclude PATH ...]   # -> holdout_set.jsonl + holdout_set.meta.json
 uv run jobfacts silver render --set holdout          # prompts in silver/prompts/<id>.md
 uv run jobfacts silver run --labeller gpt --set holdout        # paid; same for gemini_or
 uv run jobfacts silver check --labeller opus --set holdout     # opus subagents write silver/raw/opus/<id>.json
@@ -278,7 +295,11 @@ language runs short) and `<lang>_other` (low score; fills what `_ai` could not, 
 and French, where few postings are relevant). Selection ignores extractor disagreement (the test
 set used it) and uses the fixed seed 20261104; the seed, strata counts and exclusion counts are
 in `holdout_set.meta.json`. The command refuses to overwrite an existing file without `--force`,
-because labels and runs refer to it. Selection runs on the database; everything after it reads
+because labels and runs refer to it. A new held-out set is drawn with `--force`, a new `--seed`
+and one `--exclude` per earlier held-out file (keep a copy of each, for example
+`data/private/holdout_set_1.jsonl`), so that earlier sets, which have been seen during tuning,
+are never drawn again, nor other locations of the same job. The number of excluded ids is in the
+meta file as `excluded_earlier_holdout`. Selection runs on the database; everything after it reads
 files.
 
 Routing: `--set holdout` makes `silver` read `holdout_set.jsonl`. Raw answers keep the layout

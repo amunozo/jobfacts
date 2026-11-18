@@ -27,9 +27,9 @@ ROOT = Path(__file__).resolve().parents[2]
 TEMPLATE = ROOT / "prompts" / "label_posting.md"
 FIELDS_MD = ROOT / "docs" / "fields.md"
 LABELLERS = {
-    "gpt": "openai-codex/gpt-6-astra",
+    "gpt": "openai-codex/gpt-6.2-sol",
     "gemini": "opencode-go/gemini-4-argon-contributor",
-    "gemini_or": "google/gemini-4-argon",
+    "gemini_or": "google/gemini-4-carbon",
     "opus": "claude-opus-5-5 (Claude Code subagent)",
 }
 RUNNABLE = ("gpt", "gemini", "gemini_or")

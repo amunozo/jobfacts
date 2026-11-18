@@ -738,3 +738,25 @@ Newest at the bottom.
 - **Rejected:** hiding inactive employers in the search query (the postings
   would still count as open everywhere else); deleting the postings (loses
   history, and listing the employer again could not reopen them).
+
+## 2026-11-18: Second held-out set, labelled by two models
+- **What:** a new held-out set of 50 postings replaces the first one
+  (`select-holdout --force --seed 20261118 --exclude <first set>`), and its
+  reference labels come from two models, GPT-6.2 Sol and Claude Opus 5.5
+  (`silver combine --panel gpt,opus`): where both agree that value is taken,
+  where they disagree the owner decides. The CI gate was re-recorded on it.
+- **Why:** three rules had been changed from errors seen on the first set, so
+  its numbers were optimistic; a held-out set is only honest while nobody has
+  tuned on it. The new draw excludes the test set and the first held-out set
+  (ids and other locations of the same job). Two labellers were enough here:
+  they agreed on 443 of 450 answers (98.4%), which left 7 for the owner. On
+  the 19 postings a third model (Gemini 4 Carbon) had finished, it disagreed
+  with an agreeing pair once in about 170 answers and would have been outvoted.
+- **Rejected:** keeping the first set with a caveat (the numbers stay
+  optimistic); a third labeller as on the earlier sets (Gemini 4 Carbon took
+  about two minutes and $0.10 per posting, twice the estimate, for answers
+  that would change at most the 7 disagreements); the stronger GPT-6.2 Astra
+  (about four times the price of Sol; Sol was the odd one out in 4 of the 5
+  three-way disagreements seen, so its disagreements go to the owner
+  instead).
+

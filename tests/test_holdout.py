@@ -105,6 +105,91 @@ def test_select_holdout_writes_files_and_refuses_overwrite(tmp_path, monkeypatch
     assert len(testset.load_holdout(path)) == 10
 
 
+def _draw_setup(tmp_path, monkeypatch):
+    items = pool()
+    monkeypatch.setattr(testset, "_load", lambda conn, origin: items)
+    return items, tmp_path / "holdout_set.jsonl", tmp_path / "test_set.jsonl"
+
+
+def _earlier_file(tmp_path, name, records):
+    f = tmp_path / name
+    f.write_text("".join(json.dumps(r) + "\n" for r in records))
+    return f
+
+
+def test_exclude_file_ids_and_titles_are_never_drawn(tmp_path, monkeypatch):
+    items, path, test_set = _draw_setup(tmp_path, monkeypatch)
+    first = testset.select_holdout(None, 50, path, test_set_path=test_set)
+    by_id = {i["posting_id"]: i for i in items}
+    # one record by id only, one by (employer, title) only: its id is not in the pool
+    id_rec = {"posting_id": first[0]["posting_id"], "employer": "Nowhere Ltd", "title": "Nothing"}
+    twin = by_id[first[1]["posting_id"]]
+    title_rec = {"posting_id": 999999, "employer": twin["employer"], "title": twin["title"]}
+    ex = _earlier_file(tmp_path, "earlier.jsonl", [id_rec, title_rec])
+    # a twin of the first record's job with another id (another location)
+    again = testset.select_holdout(
+        None, 50, path, force=True, test_set_path=test_set, exclude_paths=[ex]
+    )
+    ids = {i["posting_id"] for i in again}
+    assert id_rec["posting_id"] not in ids
+    assert twin["posting_id"] not in ids
+    assert (twin["employer"], twin["title"]) not in {(i["employer"], i["title"]) for i in again}
+
+
+def test_seed_is_recorded_and_deterministic(tmp_path, monkeypatch):
+    _, path, test_set = _draw_setup(tmp_path, monkeypatch)
+    a = testset.select_holdout(None, 50, path, test_set_path=test_set, seed=5)
+    assert json.loads(path.with_suffix(".meta.json").read_text())["seed"] == 5
+    b = testset.select_holdout(None, 50, path, force=True, test_set_path=test_set, seed=5)
+    c = testset.select_holdout(None, 50, path, force=True, test_set_path=test_set, seed=6)
+    assert [i["posting_id"] for i in a] == [i["posting_id"] for i in b]
+    assert [i["posting_id"] for i in a] != [i["posting_id"] for i in c]
+
+
+def test_missing_exclude_path_is_an_error_and_writes_nothing(tmp_path, monkeypatch):
+    _, path, test_set = _draw_setup(tmp_path, monkeypatch)
+    missing = tmp_path / "nope.jsonl"
+    with pytest.raises(FileNotFoundError, match="nope.jsonl"):
+        testset.select_holdout(None, 50, path, test_set_path=test_set, exclude_paths=[missing])
+    assert not path.exists() and not path.with_suffix(".meta.json").exists()
+
+
+def test_excluded_earlier_holdout_counts_distinct_ids(tmp_path, monkeypatch):
+    _, path, test_set = _draw_setup(tmp_path, monkeypatch)
+    rec = lambda pid: {"posting_id": pid, "employer": f"Gone {pid}", "title": "T"}  # noqa: E731
+    a = _earlier_file(tmp_path, "a.jsonl", [rec(900001), rec(900002), rec(900003)])
+    b = _earlier_file(tmp_path, "b.jsonl", [rec(900003), rec(900004)])
+    testset.select_holdout(None, 50, path, test_set_path=test_set, exclude_paths=[a, b])
+    meta = json.loads(path.with_suffix(".meta.json").read_text())
+    assert meta["excluded_earlier_holdout"] == 4
+    testset.select_holdout(None, 50, path, force=True, test_set_path=test_set)
+    meta = json.loads(path.with_suffix(".meta.json").read_text())
+    assert meta["excluded_earlier_holdout"] == 0
+
+
+def test_cli_select_holdout_accepts_seed_and_repeated_exclude(monkeypatch, tmp_path):
+    import contextlib
+    from pathlib import Path
+
+    from jobfacts import cli, db
+
+    monkeypatch.setattr(db, "connect", lambda: contextlib.nullcontext(object()))
+    calls = []
+    monkeypatch.setattr(testset, "select_holdout", lambda *a, **k: calls.append((a, k)))
+    code = cli.main(
+        ["select-holdout", "--seed", "5", "--exclude", "a.jsonl", "--exclude", "b.jsonl"]
+    )
+    assert code == 0
+    assert calls[0][1]["seed"] == 5
+    assert calls[0][1]["exclude_paths"] == [Path("a.jsonl"), Path("b.jsonl")]
+
+    def boom(*a, **k):
+        raise FileNotFoundError("exclude file not found: a.jsonl")
+
+    monkeypatch.setattr(testset, "select_holdout", boom)
+    assert cli.main(["select-holdout", "--exclude", "a.jsonl"]) == 2
+
+
 @pytest.fixture
 def hold_dir(tmp_path):
     with (tmp_path / "holdout_set.jsonl").open("w") as f:

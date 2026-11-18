@@ -661,12 +661,25 @@ NOTES = """## Notes on reading this report
   relevance probability (>= the relevance threshold means relevant).
 """
 
-SILVER_NOTES = """- The reference is the majority of three model labellers (gpt, gemini_or, opus),
+SILVER_NOTES = """- The reference is {how},
   with the owner's decisions on split keys and corrections from the audit applied. A key with no
   majority and no decision is null and skipped, so n differs per field. The audited error
   rate (header) is the share of unanimous answers the owner found wrong: model accuracy
   above that level cannot be told apart from the reference's own noise.
 """
+
+
+def silver_reference_how(panel: tuple[str, ...]) -> str:
+    """How the reference was built, from the labellers named in its records."""
+    from jobfacts.reference import describe_panel
+
+    if len(panel) == 2:
+        return (
+            f"made by {describe_panel(panel)}: where they agree that value, "
+            "where they disagree the owner decides"
+        )
+    return f"the majority of {describe_panel(panel)}"
+
 
 OWNER_NOTES = """- Reference: the owner's own labels (`--reference owner`).
 """
@@ -697,7 +710,12 @@ def build_report(
     reference_note: str = "",
     owner_labels: dict[int, dict] | None = None,
     set_name: str = "all",
+    panel: tuple[str, ...] | None = None,
 ) -> str:
+    """`panel`: the labellers the silver reference was built from (default: the usual three)."""
+    from jobfacts.reference import PANEL
+
+    panel = panel or PANEL
     ids = {i["posting_id"] for i in items}
     labels = {p: label for p, label in labels.items() if p in ids}
     extractors = list(exts)
@@ -707,7 +725,7 @@ def build_report(
     ]
     if reference == "silver":
         parts.append(
-            "**Reference: silver labels** (majority of three model labellers plus owner review"
+            f"**Reference: silver labels** ({silver_reference_how(panel)}, plus owner review"
             f"). {reference_note}\n"
         )
     else:
@@ -733,7 +751,14 @@ def build_report(
     parts.append(section_order(order_comparisons(exts)))
     if reference == "silver" and owner_labels is not None:
         parts.append(section_vs_owner(reference_vs_owner(labels, owner_labels)))
-    parts.append(NOTES + (SILVER_NOTES if reference == "silver" else OWNER_NOTES))
+    parts.append(
+        NOTES
+        + (
+            SILVER_NOTES.format(how=silver_reference_how(panel))
+            if reference == "silver"
+            else OWNER_NOTES
+        )
+    )
     return "\n".join(parts)
 
 
@@ -765,12 +790,14 @@ def run_evaluate(
     items = load_test_set(items_path)
     owner = {} if holdout else labels_mod.latest(data_dir / "labels.jsonl")
     note = ""
+    panel = None
     if reference == "silver":
         ref_name = reference_mod.reference_file(set_name)
         if not (data_dir / ref_name).exists():
             sets = " --set holdout" if holdout else ""
             raise FileNotFoundError(f"no {ref_name}: run `jobfacts silver combine{sets}`")
         labels = reference_mod.load_reference(data_dir, set_name)
+        panel = reference_mod.reference_panel(data_dir, set_name)
         stats = reference_mod.audit_stats(data_dir, set_name)
         note = reference_mod.audit_text(stats).capitalize() + "."
     else:
@@ -783,7 +810,7 @@ def run_evaluate(
     today = today or date.today().isoformat()
     text = build_report(
         items, labels, exts, metas, relevance, today, reference, note,
-        None if holdout else owner, set_name,
+        None if holdout else owner, set_name, panel,
     )  # fmt: skip
     suffix = ("" if reference == "owner" else "_silver") + ("_holdout" if holdout else "")
     out = data_dir / "reports" / f"accuracy{suffix}_{today}.md"

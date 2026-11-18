@@ -7,6 +7,7 @@ that evaluation stays reproducible when a posting later changes or closes.
 import json
 import random
 from collections import Counter, defaultdict
+from collections.abc import Sequence
 from datetime import date
 from pathlib import Path
 
@@ -303,20 +304,28 @@ def select_holdout(
     test_set_path: Path = TEST_SET_FILE,
     labels_path: Path | None = None,
     seed: int = HOLDOUT_SEED,
+    exclude_paths: Sequence[Path] = (),
 ) -> list[dict]:
     """Write `holdout_set.jsonl` (+ `holdout_set.meta.json`). Refuses to overwrite without
-    `force`, because labels and runs refer to it."""
+    `force`, because labels and runs refer to it. Postings of the `exclude_paths` files (earlier
+    held-out sets) are never drawn, nor other locations of the same employer and title."""
     path = Path(path)
     if path.exists() and not force:
         raise FileExistsError(f"{path} exists; use --force to replace it")
+    earlier: list[dict] = []
+    for ex in exclude_paths:
+        if not Path(ex).exists():
+            raise FileNotFoundError(f"exclude file not found: {ex}")
+        earlier += load_test_set(Path(ex))
     test_items = load_test_set(test_set_path) if Path(test_set_path).exists() else []
     labels_path = labels_path or Path(test_set_path).parent / "labels.jsonl"
     owner_ids: set[int] = set()
     if Path(labels_path).exists():
         with Path(labels_path).open(encoding="utf-8") as f:
             owner_ids = {json.loads(x)["posting_id"] for x in f if x.strip()}
-    excluded = {i["posting_id"] for i in test_items} | owner_ids
-    titles = {(i["employer"], i["title"]) for i in test_items if "employer" in i}
+    earlier_ids = {i["posting_id"] for i in earlier}
+    excluded = {i["posting_id"] for i in test_items} | owner_ids | earlier_ids
+    titles = {(i["employer"], i["title"]) for i in test_items + earlier if "employer" in i}
     items = choose_holdout(_load(conn, "board"), excluded, titles, n, seed)
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as f:
@@ -331,6 +340,7 @@ def select_holdout(
         "languages": dict(Counter(i["language"] for i in items)),
         "excluded_test_set": len(test_items),
         "excluded_owner_labels": len(owner_ids),
+        "excluded_earlier_holdout": len(earlier_ids),
         "selected_at": date.today().isoformat(),
     }
     path.with_suffix(".meta.json").write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8")

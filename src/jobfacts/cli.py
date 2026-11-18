@@ -8,6 +8,7 @@ from pathlib import Path
 
 from jobfacts import db, embed
 from jobfacts.collect.run import collect
+from jobfacts.testset import HOLDOUT_SEED
 
 
 def _csv(value: str | None) -> list[str]:
@@ -165,17 +166,32 @@ def _gate(args) -> int:
 def _reference(args, data_dir) -> int:
     from jobfacts import reference
 
+    panel = reference.PANEL
+    if args.action in ("combine", "review-sheet") and args.panel is not None:
+        try:
+            panel = reference.validate_panel(_csv(args.panel))
+        except ValueError as e:
+            print(e)
+            return 2
     if args.action == "combine":
-        s = reference.combine(data_dir, args.set)
+        s = reference.combine(data_dir, args.set, panel)
         print(f"wrote {s['written']} postings to {s['path']}; support {s['support']}")
         if s["missing"]:
-            print(f"not yet answered by all three labellers: {len(s['missing'])} postings")
+            print(
+                f"not yet answered by all labellers of the panel ({', '.join(panel)}): "
+                f"{len(s['missing'])} postings"
+            )
         print(f"keys decided by review: {s['reviewed']}; unresolved splits: {s['unresolved']}")
     elif args.action == "review-sheet":
-        s = reference.review_sheet(data_dir, args.set, args.audit)
+        try:
+            s = reference.review_sheet(data_dir, args.set, args.audit, panel)
+        except ValueError as e:
+            print(e)
+            return 2
         print(
             f"{s['path']}: {s['splits']} split keys, {s['audit']} audit keys "
-            f"({s['new']} new); postings not answered by all three: {s['incomplete']}"
+            f"({s['new']} new); postings not answered by all of {', '.join(panel)}: "
+            f"{s['incomplete']}"
         )
     else:
         if not args.file:
@@ -353,6 +369,14 @@ def main(argv: list[str] | None = None) -> int:
     )
     hol.add_argument("--n", type=int, default=50)
     hol.add_argument("--force", action="store_true", help="replace an existing holdout file")
+    hol.add_argument("--seed", type=int, default=HOLDOUT_SEED, help="random seed for the draw")
+    hol.add_argument(
+        "--exclude",
+        type=Path,
+        action="append",
+        default=[],
+        help="earlier holdout .jsonl whose postings must not be drawn (repeatable)",
+    )
     lab = sub.add_parser("label", help="start the labelling app on localhost")
     lab.add_argument("--port", type=int, default=8765)
     lab.add_argument(
@@ -397,6 +421,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     sil.add_argument("file", nargs="?", type=Path, help="decisions file (review-apply)")
     sil.add_argument("--audit", type=int, default=30, help="audit sample size (review-sheet)")
+    sil.add_argument(
+        "--panel",
+        help="labellers of the reference, comma-separated, in order (combine, review-sheet; "
+        "default gpt,gemini_or,opus)",
+    )
     sil.add_argument("--set", choices=["pilot", "de", "all", "holdout"], default="pilot")
     sil.add_argument(
         "--data-dir", type=Path, help="folder with the test set (default data/private)"
@@ -506,8 +535,10 @@ def main(argv: list[str] | None = None) -> int:
             from jobfacts.testset import select_holdout
 
             try:
-                select_holdout(conn, args.n, force=args.force)
-            except FileExistsError as e:
+                select_holdout(
+                    conn, args.n, force=args.force, seed=args.seed, exclude_paths=args.exclude
+                )
+            except (FileExistsError, FileNotFoundError) as e:
                 print(e)
                 return 2
             return 0

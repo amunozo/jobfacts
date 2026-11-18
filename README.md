@@ -96,37 +96,41 @@ the first thing to check, and today that means reading every posting.
 
 ## Measured accuracy
 
-Held-out set of 50 postings (25 English, 13 German, 12 French), drawn after the
-prompts and rules had been tuned on a separate 100-posting test set. Run of
-4 November 2026. Note: this run comes after three rule changes that were made
-from errors seen on this same set on 4 November (see `docs/decisions.md`,
-"Held-out rule questions"), so the set is no longer untouched and these numbers
-are somewhat optimistic. Before those changes the extracted fields (every row
-except `relevant`) scored between 92% and 100% overall (French requirement 92%,
-German requirement 94%, title level 94%). A new held-out set has not been
-drawn yet. The `relevant` row was measured at the earlier threshold of 0.4.
+Held-out set of 50 postings (25 English, 13 German, 12 French), drawn on
+18 November 2026 with the prompts and rules already fixed. It excludes the
+100-posting test set the rules were tuned on and the first held-out set. No
+rule has been changed after looking at this set. Run of 18 November 2026.
+The first held-out set (4 November) was replaced because three rules had been
+changed from errors seen on it; see `docs/decisions.md`. The `relevant` row is
+measured at the search threshold of 0.2, which is set low on purpose to favour
+recall, so it counts many false positives as errors.
 
 | field | overall | en | de | fr |
 |---|---|---|---|---|
-| relevant (AI/data role) | 88% | 88% | 85% | 91% |
-| work mode | 96% | 100% | 92% | 92% |
-| remote from Switzerland | 96% | 92% | 100% | 100% |
-| office canton(s) | 92% | 88% | 92% | 100% |
-| office place(s) | 96% | 96% | 92% | 100% |
-| German requirement | 96% | 100% | 100% | 83% |
-| French requirement | 98% | 100% | 100% | 92% |
+| relevant (AI/data role) | 76% | 72% | 92% | 67% |
+| work mode | 92% | 96% | 85% | 92% |
+| remote from Switzerland | 90% | 92% | 85% | 92% |
+| office canton(s) | 96% | 96% | 100% | 92% |
+| office place(s) | 100% | 100% | 100% | 100% |
+| German requirement | 98% | 100% | 92% | 100% |
+| French requirement | 100% | 100% | 100% | 100% |
 | minimum years | 100% | 100% | 100% | 100% |
-| title level | 98% | 96% | 100% | 100% |
-| contract type | 98% | 100% | 100% | 92% |
-| seniority | 100% | 100% | 100% | 100% |
+| title level | 94% | 96% | 100% | 83% |
+| contract type | 100% | 100% | 100% | 100% |
+| seniority | 98% | 96% | 100% | 100% |
 
 How to read it:
 
 - **The reference labels are model labels checked by a person, not labels
-  written from scratch by hand.** Three models (GPT-6 Astra, Gemini 4 Argon,
-  Claude Opus 5.5) label each posting independently; where they disagree, the
-  author decides. In a 12-posting pilot, this reference matched the author's
-  own hand labels on 95-96% of answers. No independent audit yet.
+  written from scratch by hand.** For this set two models (GPT-6.2 Sol and
+  Claude Opus 5.5) labelled each posting independently. They agreed on 443 of
+  450 answers (98.4%); the author decided the other 7. The test set and the
+  first held-out set used a majority of three models (GPT-6 Astra, Gemini 4
+  Argon, Claude Opus 5.5); in a 12-posting pilot that reference matched the
+  author's own hand labels on 95-96% of answers. No independent audit yet.
+- **The set is not balanced.** Only 2 of the 13 German postings are AI or
+  borderline roles (few were left to draw), and one employer supplies 7 of
+  the 50 postings.
 - **The set is small.** On 50 postings, 96% has a 95% confidence interval of
   about 87-99%; per language the intervals are wider still.
 - **Cost:** about $0.0005 per posting for extraction (Jev).

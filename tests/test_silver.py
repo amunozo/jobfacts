@@ -313,7 +313,7 @@ def test_gemini_or_with_fake_client(data_dir):
     )  # fmt: skip
     assert s["done"] == [1]
     rec = json.loads((data_dir / "silver" / "gemini_or" / "1.json").read_text())
-    assert rec["model"] == "google/gemini-4-argon" and rec["usage"][0]["input"] == 500
+    assert rec["model"] == "google/gemini-4-carbon" and rec["usage"][0]["input"] == 500
 
 
 def test_openrouter_empty_reply_is_a_failed_call():
