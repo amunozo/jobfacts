@@ -885,3 +885,35 @@ ats = "workday"
 board_id = "boseallaboutme"
 wd = "wd503"
 site = "Bose_Careers"
+
+[[employer]]
+name = "Lyceum"
+ats = "ashby"
+board_id = "lyceum"
+
+[[employer]]
+name = "Sika"
+ats = "smartrecruiters"
+board_id = "SikaAG"
+
+[[employer]]
+name = "Zalando"
+ats = "workday"
+board_id = "zalando"
+wd = "wd3"
+site = "ZalandoSiteWD"
+
+[[employer]]
+name = "Firstwork"
+ats = "ashby"
+board_id = "firstwork"
+
+[[employer]]
+name = "Polpharma Biologics International AG"
+ats = "personio"
+board_id = "polpharma-biologics-switzerland-ag"
+
+[[employer]]
+name = "Refurbed"
+ats = "greenhouse"
+board_id = "refurbed"
