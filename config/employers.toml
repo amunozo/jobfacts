@@ -986,3 +986,23 @@ country = "CH"
 name = "Alchemi"
 ats = "ashby"
 board_id = "Alchemi"
+
+[[employer]]
+name = "Wayve"
+ats = "ashby"
+board_id = "wayve"
+
+[[employer]]
+name = "Seqera"
+ats = "ashby"
+board_id = "seqera.io"
+
+[[employer]]
+name = "Phoenix Technologies AG"
+ats = "greenhouse"
+board_id = "phoenixtechnologiesag"
+
+[[employer]]
+name = "Liom"
+ats = "personio"
+board_id = "liom"

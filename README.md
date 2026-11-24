@@ -26,7 +26,7 @@ the first thing to check, and today that means reading every posting.
 ## What works today
 
 - **Collection.** Reads the official public job-board APIs and feeds of about
-  184 employers (185 boards): Greenhouse, Lever, Ashby, SmartRecruiters,
+  188 employers (189 boards): Greenhouse, Lever, Ashby, SmartRecruiters,
   Recruitee, Workable, Personio, Teamtailor and Workday (sitemap and
   structured data only). Postings go into PostgreSQL; postings that disappear
   are marked closed. A run on 13 November 2026 read 166 boards and failed on 2
