@@ -24,16 +24,40 @@ done from Switzerland, and their seniority estimates are often wrong. For
 international candidates in Switzerland the language requirement is usually
 the first thing to check, and today that means reading every posting.
 
+## Architecture
+
+```mermaid
+flowchart LR
+    subgraph Daily["Daily pipeline (systemd 06:30 Zurich)"]
+        Boards["189 official job boards (9 ATS APIs)"] --> Collect["Collector"]
+        Collect --> Rel["Relevance filter (Jev)"]
+        Rel --> Extract["Fact extraction (Jev + rules)"]
+        Rel --> Embed["Embeddings (mistral-embed)"]
+    end
+
+    Extract --> DB[("PostgreSQL 16 + pgvector, nightly pg_dump 03:30")]
+    Embed --> DB
+
+    subgraph Serve["Live service (AWS Lightsail, Docker Compose)"]
+        DB --> Search["Hybrid search (FTS + pgvector RRF)"]
+        Search --> API["FastAPI API & HTML UI (jobfacts serve)"]
+        API --> Caddy["Caddy (HTTPS + HTTP Basic)"]
+    end
+
+    subgraph CI["GitHub Actions CI"]
+        Lint["ruff + ~940 pytest tests (pgvector)"] --> Gate["Encrypted CI accuracy gate"]
+    end
+```
+
 ## What works today
 
 - **Collection.** Reads the official public job-board APIs and feeds of about
   188 employers (189 boards): Greenhouse, Lever, Ashby, SmartRecruiters,
   Recruitee, Workable, Personio, Teamtailor and Workday (sitemap and
   structured data only). Postings go into PostgreSQL; postings that disappear
-  are marked closed. A run on 13 November 2026 read 166 boards and failed on 2
-  more (one answered 404, one answered empty), which were then removed from
-  the list; it left 6,462 open postings. Postings of a removed board are
-  closed at the next run.
+  are marked closed. Postings of a removed board are closed at the next run.
+  On the first server run on 24 November 2026, 169 boards succeeded (8,733 open
+  postings; 20 failed, mainly Workday returning HTTP 429 from the AWS IP).
   Each board is committed as it is read, so a crash loses at most one board. See `docs/collector.md`.
 - **Relevance filter.** A cheap classifier model scores whether a posting is
   an AI, ML, data or research role from its title and first sentences. The
@@ -50,7 +74,7 @@ the first thing to check, and today that means reading every posting.
 - **Search.** `jobfacts search` combines PostgreSQL full-text search with
   filters (canton, remote from Switzerland, maximum German level, no
   fixed-term) and groups duplicate postings. See `docs/search.md`.
-- **Search by meaning (first step of Milestone 2).** Relevant postings are
+- **Search by meaning.** Relevant postings are
   embedded with Mistral `mistral-embed` (first 6,000 characters) into
   pgvector. `jobfacts search` by default fuses the full-text ranking and the
   similarity ranking with reciprocal rank fusion, keeping every filter; it
@@ -58,7 +82,7 @@ the first thing to check, and today that means reading every posting.
   the similarity ranking only above a measured similarity floor, so a
   nonsense query returns nothing instead of its 200 nearest postings. `jobfacts daily`
   embeds new and changed postings. See `docs/search.md`.
-- **HTTP API and search page (Milestone 2).** `jobfacts serve` starts a
+- **HTTP API and search page.** `jobfacts serve` starts a
   FastAPI service: `/api/search` returns the same results as `jobfacts search
   --json`, `/` is a server-rendered search page (filters, facts and their
   supporting quotes, no JavaScript), `/search` is a simpler page with only a
@@ -67,19 +91,19 @@ the first thing to check, and today that means reading every posting.
   one AWS Lightsail instance (Ubuntu 24.04, 1 GB RAM with 2 GB swap) in Docker
   Compose behind Caddy with automatic Let's Encrypt HTTPS. See `docs/api.md`
   and `docs/deploy.md`.
-- **Light monitoring (Milestone 2).** `jobfacts daily` records each run in a
+- **Light monitoring.** `jobfacts daily` records each run in a
   `daily_runs` table (status, failed step, the summary numbers, cost), shown at
   `/runs`; `/health` reports the last run; with `JOBFACTS_HEALTHCHECK_URL` set
   it pings an outside dead-man service (start, success, failure). `/runs` and
   `/health` run live on the server; the outside alert services are not
   configured yet. See `docs/monitoring.md`.
-- **Accuracy gate for CI (Milestone 2).** The held-out labels and the model's
+- **Accuracy gate for CI.** The held-out labels and the model's
   recorded answers for those 50 postings are stored encrypted in `ci/`; a CI
   step decrypts them with a secret key, re-applies the code rules and fails if
   any of 10 fields loses more than 2 points against `ci/accuracy_baseline.json`.
   It measures changes to the code rules on fixed answers, not model drift, and
   skips when the key is not set (forks). See `docs/gate.md`.
-- **Load test (Milestone 2).** A Locust test (`loadtest/`, `docs/loadtest.md`)
+- **Load test.** A Locust test (`loadtest/`, `docs/loadtest.md`)
   runs the production Docker stack on a laptop, limited to 2 CPU threads and
   the compose memory limits, through Caddy over HTTPS, on the real data (about
   2,500 embedded postings; query embeddings cached): p95 310 ms at 25 simulated
@@ -191,7 +215,7 @@ API key; relevance and extraction need `TYPESAFE_API_KEY`.
 uv run ruff check . && uv run ruff format --check . && uv run pytest
 ```
 
-About 900 tests; the database tests use the compose database and are skipped
+About 940 tests (943 as of 24 November 2026); the database tests use the compose database and are skipped
 locally when it is not running. GitHub Actions runs the same checks, with a
 PostgreSQL service, on every push and pull request; there the database tests
 fail instead of being skipped. A last step runs the accuracy gate
@@ -215,11 +239,11 @@ Each design decision, with the alternatives rejected, is in
 
 ## Milestones
 
-1. **Collection and the first facts** (in progress): collector, relevance
+1. **Collection and the first facts** (done): collector, relevance
    filter, extraction with quotes, labelled postings with an accuracy table,
-   command-line search. Done when the daily run has worked for a week and the
-   search replaces reading postings by hand.
-2. **A usable service:** search by meaning (pgvector), a FastAPI service and a
+   command-line search.
+2. **A usable service** (deployed; outside alerts and live-server load test
+   remaining): search by meaning (pgvector), a FastAPI service and a
    simple web page, Docker deployment on one cloud provider, monitoring, an
    accuracy gate in CI, a load test with a stated result.
 3. **More facts and salary:** PhD, stated salary, and a
@@ -259,6 +283,8 @@ Each design decision, with the alternatives rejected, is in
 
 ## Stack
 
-Python 3.12, PostgreSQL 16 with pgvector, psycopg with plain SQL migrations,
-httpx, pytest, ruff, uv, Docker Compose and GitHub Actions. LLM providers:
-TypeSafe (Jev), OpenRouter (comparison models and the Jev backup route).
+Python 3.12, FastAPI, Jinja2, pydantic, PostgreSQL 16 with pgvector,
+psycopg/psycopg_pool with plain SQL migrations, httpx, Docker Compose, Caddy
+(HTTPS), AWS Lightsail, systemd timers, Locust, pytest, ruff, uv, and GitHub
+Actions. Model/API providers: TypeSafe (Jev classifier), Mistral
+(`mistral-embed`), OpenRouter (comparison models and the Jev backup route).
