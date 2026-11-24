@@ -9,11 +9,12 @@ office is, and the real seniority. Each fact points to the sentence in the
 posting that supports it, so any answer can be checked in seconds. When a
 posting does not state a fact, jobfacts stores "not stated" and never guesses.
 
-**Status (8 November 2026): Milestone 1 of 4 built (its last check, a week of
-daily runs, is under way); Milestone 2 started.** The collector, the
-extraction and a command-line search (full text plus search by meaning) work,
-and the author uses them for their own job search. It is a personal project, not a hosted service. See
-"Not built yet" below.
+**Status (24 November 2026): Milestone 1 built (daily runs verified 18–24 Nov);
+Milestone 2 deployed on AWS Lightsail (outside alerts and server load test
+remaining).** The collector, extraction, hybrid search, HTTP API, web pages and
+scheduled daily update run on a single Linux server behind HTTPS and a password,
+and the author uses them for their own job search. It is a personal project, not
+a public service. See "Not built yet" below.
 
 ## Why
 
@@ -63,12 +64,15 @@ the first thing to check, and today that means reading every posting.
   supporting quotes, no JavaScript), `/search` is a simpler page with only a
   query box, `/health` reports the database state.
   Everything except `/health` sits behind a password (HTTP Basic). It runs on
-  the author's machine; it is not deployed. See `docs/api.md`.
+  one AWS Lightsail instance (Ubuntu 24.04, 1 GB RAM with 2 GB swap) in Docker
+  Compose behind Caddy with automatic Let's Encrypt HTTPS. See `docs/api.md`
+  and `docs/deploy.md`.
 - **Light monitoring (Milestone 2).** `jobfacts daily` records each run in a
   `daily_runs` table (status, failed step, the summary numbers, cost), shown at
   `/runs`; `/health` reports the last run; with `JOBFACTS_HEALTHCHECK_URL` set
-  it pings an outside dead-man service (start, success, failure). Tested with
-  fake HTTP only: no real check has been set up yet. See `docs/monitoring.md`.
+  it pings an outside dead-man service (start, success, failure). `/runs` and
+  `/health` run live on the server; the outside alert services are not
+  configured yet. See `docs/monitoring.md`.
 - **Accuracy gate for CI (Milestone 2).** The held-out labels and the model's
   recorded answers for those 50 postings are stored encrypted in `ci/`; a CI
   step decrypts them with a secret key, re-applies the code rules and fails if
@@ -91,8 +95,12 @@ the first thing to check, and today that means reading every posting.
   and the recall. The applications themselves stay private
   (`docs/search.md`).
 - **Daily update.** `jobfacts daily` runs the whole update in one command
-  (database, migrations, collection, relevance, extraction). It is started by
-  hand for now.
+  (database, migrations, collection, relevance, extraction, embeddings). On the
+  server a systemd timer runs it every morning at 06:30 Europe/Zurich, with a
+  nightly `pg_dump` backup at 03:30. The first server run on 24 November 2026
+  took ~3 minutes (8,733 open postings, 169 boards ok, 0 extraction/embedding
+  errors, $0.028; peak memory 236 MiB for `daily` and 180 MiB for PostgreSQL on
+  the 1 GB instance).
 
 ## Measured accuracy
 
@@ -152,10 +160,9 @@ longer texts.
 
 ## Not built yet
 
-- A running deployment (Milestone 2). The files and a step-by-step guide for
-  one AWS Lightsail server with Docker Compose exist (`docs/deploy.md`) and
-  were tested locally, but nothing is deployed, so there is no scheduled daily
-  run on a server and no outside alert configured yet.
+- Outside monitoring alerts (healthchecks.io dead-man switch and an uptime
+  monitor for `/health` — the code is deployed, the external checks are not
+  configured yet).
 - A load test against the real server (the one above ran on a laptop).
 - PhD and stated-salary fields, salary estimates (Milestone 3).
 - Commute time and relisted roles (Milestone 4).
