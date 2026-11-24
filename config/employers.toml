@@ -917,3 +917,77 @@ board_id = "polpharma-biologics-switzerland-ag"
 name = "Refurbed"
 ats = "greenhouse"
 board_id = "refurbed"
+
+[[employer]]
+name = "BSI Software"
+ats = "recruitee"
+board_id = "bsisoftware"
+
+[[employer]]
+name = "microagi"
+ats = "ashby"
+board_id = "microagi"
+
+[[employer]]
+name = "Harmattan AI"
+ats = "ashby"
+board_id = "harmattan-ai"
+
+[[employer]]
+name = "act"
+ats = "ashby"
+board_id = "actcareers"
+
+[[employer]]
+name = "Raiffeisen"
+ats = "workday"
+board_id = "raiffeisen"
+wd = "wd3"
+site = "jobs-raiffeisen"
+
+[[employer]]
+name = "EVB"
+ats = "smartrecruiters"
+board_id = "EVB"
+
+[[employer]]
+name = "AlmavivA de Belgique"
+ats = "recruitee"
+board_id = "almavivadebelgique"
+
+[[employer]]
+name = "L'Occitane"
+ats = "teamtailor"
+board_id = "loccitane"
+url = "https://jobs-loi.loccitane.com/jobs.rss"
+
+[[employer]]
+name = "DuckDuckGo"
+ats = "ashby"
+board_id = "duck-duck-go"
+
+[[employer]]
+name = "Intellishore"
+ats = "greenhouse"
+board_id = "intellishoredk"
+
+[[employer]]
+name = "Arago"
+ats = "ashby"
+board_id = "arago"
+
+[[employer]]
+name = "ServiceNow"
+ats = "smartrecruiters"
+board_id = "ServiceNow"
+country = "CH"
+
+[[employer]]
+name = "Alchemi"
+ats = "ashby"
+board_id = "Alchemi"
+
+[[employer]]
+name = "Primefold"
+ats = "personio"
+board_id = "work-at-saypien"
