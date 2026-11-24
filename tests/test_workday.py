@@ -179,17 +179,31 @@ def test_prefilter_does_not_veto_foreign_looking_slugs():
 # --- rate limiter ----------------------------------------------------------------------------
 
 
-def test_rate_limiter_spaces_requests_per_host_without_real_sleep():
+def test_rate_limiter_spaces_requests_globally_without_real_sleep():
     c = FakeClock()
     lim = workday.RateLimiter(1.0, clock=c.clock, sleep=c.sleep)
-    lim.wait("a.test")  # first request goes at once
-    lim.wait("a.test")
-    lim.wait("a.test")
-    lim.wait("b.test")  # another host is independent
+    lim.wait()  # first request goes at once
+    lim.wait()
+    lim.wait()
     assert c.slept == [1.0, 1.0]
     c.now += 5  # a pause longer than the interval needs no waiting
-    lim.wait("a.test")
+    lim.wait()
     assert c.slept == [1.0, 1.0]
+
+
+def test_rate_limiter_is_shared_across_different_workday_hosts():
+    c = FakeClock()
+    lim = workday.RateLimiter(1.0, clock=c.clock, sleep=c.sleep)
+    site_a = Site([(u("Bern", "A_R-1"), None)], {u("Bern", "A_R-1"): page("A")})
+    site_b = Site(
+        [("https://other.wd5.myworkdayjobs.com/Careers/job/Zurich/B_R-2", None)],
+        {"https://other.wd5.myworkdayjobs.com/Careers/job/Zurich/B_R-2": page("B")},
+    )
+    workday.fetch(site_a.client(), "acme", EXTRA, None, lim)
+    workday.fetch(site_b.client(), "other", {"wd": "wd5", "site": "Careers"}, None, lim)
+    total_requests = len(site_a.requests) + len(site_b.requests)
+    assert total_requests == 6
+    assert len(c.slept) == total_requests - 1  # no burst when switching hosts
 
 
 def test_fetch_waits_between_requests():
@@ -287,6 +301,63 @@ def test_too_many_requests_stops_the_read_early():
     assert [p.source_job_id for p in read.postings] == ["R-1"]
     assert c not in site.requests
     assert "stopped early" in read.notes
+    assert read.rate_limited is False
+
+
+def test_429_on_page_sets_rate_limited_does_not_retry_and_skips_gone_checks():
+    entries = capped_entries()
+    new_a, new_b = u("Bern", "New_R-new-a"), u("Zurich", "New_R-new-b")
+    entries[0] = (new_a, None)
+    entries[1] = (new_b, None)
+    known = {f"R-{i}": None for i in range(2, workday.SITEMAP_CAP)}
+    missing_url = u("Bern", "Old_R-missing")
+    known["R-missing"] = None
+    site = Site(entries, {new_a: 429, new_b: page(), missing_url: 404})
+    read = workday.fetch(
+        site.client(), "acme", EXTRA, known, limiter(), known_urls={"R-missing": missing_url}
+    )
+    assert read.rate_limited is True
+    assert site.requests.count(new_a) == 1  # HTTP 429 is not retried
+    assert new_b not in site.requests
+    assert missing_url not in site.requests  # gone checks skipped after 429
+    assert read.close_ids == set()
+
+
+def test_429_on_extra_site_sets_rate_limited_and_skips_pages():
+    main = u("Bern", "A_r-1-2")
+    site = TwoSites([(main, None)], 429, {main: page("A")})
+    read = workday.fetch(site.client(), "acme", MERGE, None, limiter())
+    assert read.rate_limited is True
+    assert read.close_missing is False
+    assert read.postings == []
+    assert site.requests.count(f"{TECH}/siteMap.xml") == 1
+    assert main not in site.requests
+
+
+def test_429_on_gone_check_sets_rate_limited():
+    urls = {"X-0": u("Bern", "X_X-0"), "X-1": u("Bern", "X_X-1")}
+    pages = {urls["X-0"]: 429, urls["X-1"]: 404}
+    site = GoneSite(capped_entries(), pages)
+    read = workday.fetch(site.client(), "acme", EXTRA, dict.fromkeys(urls), limiter(), urls)
+    assert read.rate_limited is True
+    assert read.close_ids == set()
+    assert urls["X-1"] not in site.requests
+
+
+def test_429_on_main_sitemap_raises_without_retrying():
+    class Sitemap429(Site):
+        def handler(self, request):
+            url = str(request.url)
+            self.requests.append(url)
+            if url.endswith("/siteMap.xml"):
+                return httpx.Response(429, text="")
+            return super().handler(request)
+
+    site = Sitemap429([], {})
+    with pytest.raises(httpx.HTTPStatusError) as exc:
+        workday.fetch(site.client(), "acme", EXTRA, None, limiter())
+    assert exc.value.response.status_code == 429
+    assert site.requests.count(f"{SITE}/siteMap.xml") == 1
 
 
 # --- closing via the sitemap ------------------------------------------------------------------
@@ -717,3 +788,95 @@ def test_capped_read_closes_nothing_when_every_checked_page_is_an_empty_shell():
     )
     assert read.close_ids == set()
     assert "suspicious" in read.notes
+
+
+# --- serial execution and stop-on-first-429 in collect() ---------------------------------------
+
+
+@pytest.mark.db
+def test_collect_runs_serial_boards_one_by_one_and_stops_on_first_429(conn, tmp_path):
+    path = tmp_path / "e.toml"
+    path.write_text(
+        '[[employer]]\nname="W1"\nats="workday"\nboard_id="w1"\n'
+        '[[employer]]\nname="W2"\nats="workday"\nboard_id="w2"\n'
+        '[[employer]]\nname="W3"\nats="workday"\nboard_id="w3"\n'
+    )
+    active = 0
+    max_active = 0
+    called = []
+
+    def seed_fake(client, board_id, extra, known):
+        return BoardRead([posting(f"{board_id}-1")], {f"{board_id}-1"})
+
+    seed_fake.incremental = True
+    seed_fake.serial = True
+    collect(conn, fetchers={"workday": seed_fake}, employers_file=path)
+
+    # Case 1: W1 succeeds, W2 raises HTTP 429 -> W3 is skipped and its posting stays open.
+    def fail_429(client, board_id, extra, known):
+        nonlocal active, max_active
+        active += 1
+        max_active = max(max_active, active)
+        try:
+            called.append(board_id)
+            if board_id == "w2":
+                req = httpx.Request("GET", "https://w2.wd3.myworkdayjobs.com/Careers/siteMap.xml")
+                raise httpx.HTTPStatusError(
+                    "429", request=req, response=httpx.Response(429, request=req)
+                )
+            return BoardRead([posting(f"{board_id}-1")], {f"{board_id}-1"})
+        finally:
+            active -= 1
+
+    fail_429.incremental = True
+    fail_429.serial = True
+    s = collect(conn, fetchers={"workday": fail_429}, employers_file=path)
+    assert max_active == 1
+    assert called == ["w1", "w2"]
+    assert (s.boards_ok, s.boards_failed) == (1, 2)
+    assert closed(conn, "w3-1") is False
+    reads = dict(
+        conn.execute(
+            "SELECT e.board_id, b.error FROM board_reads b "
+            "JOIN employers e ON e.id = b.employer_id WHERE b.run_id = %s",
+            (s.run_id,),
+        ).fetchall()
+    )
+    assert reads["w1"] is None
+    assert "429" in reads["w2"]
+    assert reads["w3"].startswith("skipped: workday rate-limited")
+
+    # Case 2: W1 returns a partial BoardRead(rate_limited=True) -> W1 stored, W2 & W3 skipped.
+    called.clear()
+
+    def partial_429(client, board_id, extra, known):
+        called.append(board_id)
+        if board_id == "w1":
+            return BoardRead(
+                [posting("w1-new")], {"w1-1", "w1-new"}, close_missing=False, rate_limited=True
+            )
+        raise AssertionError(f"{board_id} should have been skipped")
+
+    partial_429.incremental = True
+    partial_429.serial = True
+    s2 = collect(conn, fetchers={"workday": partial_429}, employers_file=path)
+    assert called == ["w1"]
+    assert (s2.boards_ok, s2.boards_failed, s2.counts.new) == (1, 2, 1)
+
+    # Case 3: HTTP 403 on W1 stops only W1; W2 and W3 are still read.
+    called.clear()
+
+    def fail_403(client, board_id, extra, known):
+        called.append(board_id)
+        if board_id == "w1":
+            req = httpx.Request("GET", "https://w1.wd3.myworkdayjobs.com/Careers/siteMap.xml")
+            raise httpx.HTTPStatusError(
+                "403", request=req, response=httpx.Response(403, request=req)
+            )
+        return BoardRead([], {f"{board_id}-1"})
+
+    fail_403.incremental = True
+    fail_403.serial = True
+    s3 = collect(conn, fetchers={"workday": fail_403}, employers_file=path)
+    assert called == ["w1", "w2", "w3"]
+    assert (s3.boards_ok, s3.boards_failed) == (2, 1)

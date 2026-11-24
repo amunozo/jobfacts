@@ -50,3 +50,4 @@ class BoardRead:
     notes: str = ""
     close_missing: bool = True  # False when the list is known to be incomplete
     close_ids: set[str] = field(default_factory=set)  # verified gone one by one (capped lists)
+    rate_limited: bool = False  # True tells the collector to skip remaining boards of this ATS

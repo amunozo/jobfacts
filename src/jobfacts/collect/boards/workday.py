@@ -6,12 +6,15 @@ employers opted in by hand in `config/employers.toml`. See `notes/workday_terms.
 
 Rules this module enforces:
 - robots.txt of the tenant host is fetched first; disallowed URLs are never requested.
-- at most one request per second per host, shared by all threads (`RateLimiter`).
+- boards are read serially (`fetch.serial = True`) at most once per second across all Workday
+  hosts (`RateLimiter`), so different tenants never burst against Workday's shared edge.
 - incremental: a posting page is fetched only if it is new or its sitemap `lastmod` changed.
 - only pages whose URL location segment looks Swiss or remote are fetched (`url_is_candidate`).
 - a capped sitemap cannot show what closed, so stored open postings missing from it get their
   own page requested (same robots check and rate limit, at most `MAX_GONE_CHECKS` per run) and
   are closed only on a clear "gone" answer (see `page_status`).
+- HTTP 429 is not retried and sets `rate_limited = True` (or propagates from the main site) so
+  the collector stops Workday for the rest of the run.
 """
 
 import json
@@ -42,7 +45,7 @@ MAX_GONE_CHECKS = 200  # own-page checks per employer per run
 
 
 class RateLimiter:
-    """At most one request per `interval` seconds per host, across threads.
+    """At most one request per `interval` seconds across all Workday hosts.
 
     `clock` and `sleep` are injectable so tests never really wait.
     """
@@ -54,14 +57,14 @@ class RateLimiter:
         sleep: Callable[[float], None] = time.sleep,
     ):
         self.interval, self.clock, self.sleep = interval, clock, sleep
-        self._next: dict[str, float] = {}
+        self._next: float | None = None
         self._lock = threading.Lock()
 
-    def wait(self, host: str) -> None:
+    def wait(self) -> None:
         with self._lock:  # reserve a slot, then sleep outside the lock
             now = self.clock()
-            slot = max(now, self._next.get(host, now))
-            self._next[host] = slot + self.interval
+            slot = now if self._next is None else max(now, self._next)
+            self._next = slot + self.interval
         if slot > now:
             self.sleep(slot - now)
 
@@ -76,7 +79,7 @@ class LimitedClient:
         self.client, self.limiter = client, limiter
 
     def get(self, url: str, headers: dict | None = None):
-        self.limiter.wait(urlparse(url).netloc)
+        self.limiter.wait()
         return self.client.get(url, headers=headers)
 
 
@@ -213,14 +216,15 @@ _EMPTY_OG_TITLE = re.compile(r'<meta[^>]*property="og:title"(?![^>]*content="[^"
 
 
 def page_status(client, robots, url: str) -> str:
-    """Is the posting page still there? One of `open`, `gone`, `gone_shell`, `unknown`, `stop`.
+    """Is the posting page still there? One of `open`, `gone`, `gone_shell`, `unknown`, `stop`,
+    `rate_limited`.
 
     `gone` only on a clear signal: HTTP 404/410, or a redirect away from the posting (Workday
     sends removed jobs to the site's search/home page, so the final URL no longer has the
     requisition id). A 200 page on the same URL counts as `open` if it has the JobPosting
     JSON-LD; without it we cannot tell (JavaScript shell, maintenance page): `unknown`. Errors,
-    timeouts, 5xx and robots-disallowed URLs are `unknown`: never close on them. 403/429 means
-    the site asks us to stop (`stop`).
+    timeouts, 5xx and robots-disallowed URLs are `unknown`: never close on them. 403 stops
+    this employer (`stop`); 429 stops Workday for the run (`rate_limited`).
     """
     if not robots.can_fetch(USER_AGENT, url):
         return "unknown"
@@ -231,7 +235,9 @@ def page_status(client, robots, url: str) -> str:
     code = response.status_code
     if code in (404, 410):
         return "gone"
-    if code in (403, 429):
+    if code == 429:
+        return "rate_limited"
+    if code == 403:
         return "stop"
     wanted = job_id_from_url(url).lower()
     if code in (301, 302, 303, 307, 308):  # client that does not follow redirects
@@ -292,13 +298,17 @@ def fetch(
     entries: dict[str, tuple[str, str | None]] = {}  # key -> (url, lastmod); main site wins
     capped_sites = []
     site_notes = []
+    rate_limited = False
+    stopped_early = False
     for index, site in enumerate(sites):
         sitemap_url = f"{base}/{site}/siteMap.xml"
         try:
             if not robots.can_fetch(USER_AGENT, sitemap_url):
                 raise PermissionError(f"robots.txt disallows {sitemap_url}")
             listed = parse_sitemap(
-                _get(client, sitemap_url, 2, accept="application/xml, text/xml").text
+                _get(
+                    client, sitemap_url, 2, accept="application/xml, text/xml", retry_429=False
+                ).text
             )
         except (PermissionError, httpx.HTTPError, ValueError) as error:
             if index == 0:
@@ -307,6 +317,11 @@ def fetch(
             # nothing.
             capped_sites.append(site)
             site_notes.append(f"extra site {site} not read ({type(error).__name__}: {error})")
+            if isinstance(error, httpx.HTTPStatusError) and error.response.status_code == 429:
+                failures["HTTP 429"] += 1
+                rate_limited = True
+                stopped_early = True
+                break
             continue
         stats["sitemap"] += len(listed)
         site_notes.append(f"{site} {len(listed)}")
@@ -337,30 +352,40 @@ def fetch(
             to_fetch.append((job_id, url, lastmod))
 
     postings = []
-    for index, (job_id, url, lastmod) in enumerate(to_fetch):
-        try:
-            page = _get(client, url, 2, accept=_PAGE_ACCEPT).text
-            postings.append(replace(parse_posting(page, url, lastmod), source_job_id=job_id))
-        except httpx.HTTPStatusError as error:
-            code = error.response.status_code
-            failures[f"HTTP {code}"] += 1
-            if code in (403, 429):  # the site asks us to stop: leave the rest for the next run
-                failures["stopped early (rest deferred)"] += len(to_fetch) - index - 1
-                break
-        except (httpx.TransportError, ValueError) as error:
-            failures[f"{type(error).__name__}: {error}"] += 1
+    if rate_limited:
+        if to_fetch:
+            failures["stopped early (rest deferred)"] += len(to_fetch)
+    else:
+        for index, (job_id, url, lastmod) in enumerate(to_fetch):
+            try:
+                page = _get(client, url, 2, accept=_PAGE_ACCEPT, retry_429=False).text
+                postings.append(replace(parse_posting(page, url, lastmod), source_job_id=job_id))
+            except httpx.HTTPStatusError as error:
+                code = error.response.status_code
+                failures[f"HTTP {code}"] += 1
+                if code in (403, 429):  # ask to stop: leave the rest for the next run
+                    stopped_early = True
+                    if code == 429:
+                        rate_limited = True
+                    failures["stopped early (rest deferred)"] += len(to_fetch) - index - 1
+                    break
+            except (httpx.TransportError, ValueError) as error:
+                failures[f"{type(error).__name__}: {error}"] += 1
     postings = _drop_universal_remote(postings)
     stats["fetched"] = len(to_fetch) - sum(
         n for reason, n in failures.items() if reason.startswith("stopped")
     )
     close_ids: set[str] = set()
     gone_note = ""
-    if capped_sites and known_urls:
+    if capped_sites and known_urls and not stopped_early:
         absent = [(i, known_urls[i]) for i in known_urls if i not in seen][:MAX_GONE_CHECKS]
         checked = 0
         shell_ids: set[str] = set()
         for job_id, url in absent:
             status = page_status(client, robots, url)
+            if status == "rate_limited":
+                rate_limited = True
+                break
             if status == "stop":
                 break
             checked += 1
@@ -402,8 +427,10 @@ def fetch(
         notes=notes,
         close_missing=not capped_sites,
         close_ids=close_ids,
+        rate_limited=rate_limited,
     )
 
 
 fetch.incremental = True
 fetch.checks_gone = True  # run.py passes `known_urls`
+fetch.serial = True

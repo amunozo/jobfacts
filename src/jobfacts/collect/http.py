@@ -25,12 +25,19 @@ def get_text(client: httpx.Client, url: str, retries: int = 2) -> str:
     return _get(client, url, retries, accept="application/xml, application/rss+xml, text/xml").text
 
 
-def _get(client: httpx.Client, url: str, retries: int, accept: str | None = None):
+def _get(
+    client: httpx.Client,
+    url: str,
+    retries: int,
+    accept: str | None = None,
+    retry_429: bool = True,
+):
     headers = {"Accept": accept} if accept else None
+    retry_codes = (429, 500, 502, 503, 504) if retry_429 else (500, 502, 503, 504)
     for attempt in range(retries + 1):
         try:
             response = client.get(url, headers=headers)
-            if response.status_code in (429, 500, 502, 503, 504) and attempt < retries:
+            if response.status_code in retry_codes and attempt < retries:
                 time.sleep(2 * (attempt + 1))
                 continue
             response.raise_for_status()

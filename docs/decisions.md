@@ -760,3 +760,19 @@ Newest at the bottom.
   three-way disagreements seen, so its disagreements go to the owner
   instead).
 
+## 2026-11-24: Workday boards run serially with one shared pace and stop at the first 429
+- **What:** Workday boards now run one by one after the parallel pool
+  (`fetch.serial = True`), share one global 1 request/second `RateLimiter`
+  across all Workday hosts, never retry HTTP 429, and stop Workday for the
+  rest of the run on the first 429 (remaining Workday boards are recorded as
+  skipped without closing postings; HTTP 403 still stops only that board).
+- **Why:** starting 16 November 2026, 16 of 18 Workday boards failed per run
+  with HTTP 429. Reading six Workday hosts in parallel with only a per-host
+  limiter plus 429 retries hit Workday's shared edge rate limit across
+  tenants. With mostly unchanged sitemaps, reading ~19 boards serially at
+  1 req/s adds roughly 40 seconds per daily run.
+- **Rejected:** retrying 429 with longer backoff (keeps hammering a tripped
+  edge limit); keeping per-host limiters across threads (different Workday
+  hosts still burst together); dropping Workday (loses major Swiss
+  employers).
+

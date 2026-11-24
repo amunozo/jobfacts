@@ -4,6 +4,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 
+import httpx
 import psycopg
 
 from jobfacts.collect import store
@@ -76,40 +77,70 @@ def collect(
                     result = fetchers[ats](client, board_id, extra or {})
                 if not isinstance(result, BoardRead):
                     result = BoardRead(postings=result)
-                return employer, result, None
+                return employer, result, None, result.rate_limited
+        except httpx.HTTPStatusError as error:
+            return (
+                employer,
+                None,
+                f"{type(error).__name__}: {error}",
+                error.response.status_code == 429,
+            )
         except Exception as error:  # noqa: BLE001 - any failure means "board not read"
-            return employer, None, f"{type(error).__name__}: {error}"
+            return employer, None, f"{type(error).__name__}: {error}", False
 
-    # Boards are fetched in parallel (limited); all database writes stay in this thread.
-    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
-        for employer, result, error in pool.map(read, employers):
-            employer_id, name = employer[0], employer[1]
-            if error is None and not result.postings and not result.seen_ids:
-                open_now = store.open_count(conn, employer_id)
-                if open_now:
-                    # An empty answer from a board that had open postings is more
-                    # likely a glitch than every role closing at once.
-                    error = f"empty response while {open_now} postings were open; nothing closed"
-            if error is None:
-                c = store.record_success(
-                    conn,
-                    summary.run_id,
-                    employer_id,
-                    result.postings,
-                    result.seen_ids,
-                    result.close_missing,
-                    result.close_ids,
-                )
-                if result.notes:
-                    summary.notes.append((name, result.notes))
-                summary.boards_ok += 1
-                summary.counts.new += c.new
-                summary.counts.updated += c.updated
-                summary.counts.closed += c.closed
-            else:
-                store.record_failure(conn, summary.run_id, employer_id, error)
-                summary.boards_failed += 1
-                summary.failures.append((name, error))
+    def record(employer, result, error):
+        employer_id, name = employer[0], employer[1]
+        if error is None and not result.postings and not result.seen_ids:
+            open_now = store.open_count(conn, employer_id)
+            if open_now:
+                # An empty answer from a board that had open postings is more
+                # likely a glitch than every role closing at once.
+                error = f"empty response while {open_now} postings were open; nothing closed"
+        if error is None:
+            c = store.record_success(
+                conn,
+                summary.run_id,
+                employer_id,
+                result.postings,
+                result.seen_ids,
+                result.close_missing,
+                result.close_ids,
+            )
+            if result.notes:
+                summary.notes.append((name, result.notes))
+            summary.boards_ok += 1
+            summary.counts.new += c.new
+            summary.counts.updated += c.updated
+            summary.counts.closed += c.closed
+        else:
+            store.record_failure(conn, summary.run_id, employer_id, error)
+            summary.boards_failed += 1
+            summary.failures.append((name, error))
+
+    parallel = [e for e in employers if not getattr(fetchers[e[2]], "serial", False)]
+    serial = [e for e in employers if getattr(fetchers[e[2]], "serial", False)]
+
+    # Parallel boards share the pool; serial boards (Workday) run one by one after so they
+    # keep one shared pace and stop at the first HTTP 429. All database writes stay here.
+    if parallel:
+        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
+            for employer, result, error, _ in pool.map(read, parallel):
+                record(employer, result, error)
+
+    stopped_ats: set[str] = set()
+    for employer in serial:
+        ats = employer[2]
+        if ats in stopped_ats:
+            record(
+                employer,
+                None,
+                f"skipped: {ats} rate-limited (HTTP 429) earlier in this run",
+            )
+            continue
+        employer, result, error, rate_limited = read(employer)
+        record(employer, result, error)
+        if rate_limited:
+            stopped_ats.add(ats)
     store.finish_run(conn, summary.run_id, summary.boards_ok, summary.boards_failed, summary.counts)
     summary.seconds = time.monotonic() - started
     return summary

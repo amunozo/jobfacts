@@ -82,8 +82,11 @@ requested; a disallowed sitemap fails the read), then `/<site>/siteMap.xml`, the
 `JobPosting` JSON-LD of each posting page. The `/wday/cxs/` JSON endpoint is not used. See
 `notes/workday_terms.md`.
 
-- One request per second per host (shared across threads), plus the usual retry/backoff.
-  A 403/429 on a page stops that employer's read; the rest waits for the next run.
+- Workday boards are read serially, one board at a time, with one shared 1 request per second
+  rate limit across all Workday hosts. HTTP 429 is not retried; the first 429 stops Workday
+  for the rest of the run (any remaining Workday boards are logged as skipped in `board_reads`
+  without closing postings). A 403 still stops only that employer; the rest waits for the next
+  run.
 - Only pages whose URL location segment looks Swiss or remote are fetched. Set
   `prefilter = false` on an employer whose jobs are all Swiss (Swisscom).
   `scripts/workday_prefilter_check.py` samples skipped URLs to check the filter.
@@ -115,8 +118,8 @@ requested; a disallowed sitemap fails the read), then `/<site>/siteMap.xml`, the
   employer per run, least recently seen first). It is closed only on a clear "gone" answer: HTTP
   404/410, or a redirect away from the posting URL (Workday sends removed jobs to the site
   page). A 200 page with JobPosting JSON-LD keeps it open (and refreshes `last_seen_at`); a
-  200 page without it, errors, timeouts, 5xx and robots-disallowed URLs change nothing; a
-  403/429 ends the checks. The run notes say "checked N postings missing from the capped list,
-  closed M".
+  200 page without it, errors, timeouts, 5xx and robots-disallowed URLs change nothing; a 403
+  ends that employer's checks, and a 429 ends Workday for the run. The run notes say
+  "checked N postings missing from the capped list, closed M".
 - "Remote" is added for `jobLocationType = TELECOMMUTE`, unless nearly every posting of the
   employer has it (several tenants flag everything).
