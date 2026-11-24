@@ -986,8 +986,3 @@ country = "CH"
 name = "Alchemi"
 ats = "ashby"
 board_id = "Alchemi"
-
-[[employer]]
-name = "Primefold"
-ats = "personio"
-board_id = "work-at-saypien"
